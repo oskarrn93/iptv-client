@@ -91,7 +91,7 @@ func TestArgs(t *testing.T) {
 		exe  string
 		want []string
 	}{
-		{`C:\Program Files\VideoLAN\VLC\vlc.exe`, []string{
+		{filepath.Join("Program Files", "VideoLAN", "VLC", "vlc.exe"), []string{
 			"--meta-title=BBC One HD",
 			"--http-referrer=http://r/",
 			"--http-user-agent=UA",
@@ -118,8 +118,8 @@ func TestArgs(t *testing.T) {
 			"--mpv-user-agent=UA",
 			stream,
 		}},
-		{`C:\Program Files\MPC-HC\mpc-hc64.exe`, []string{stream}},
-		{`C:\Program Files\DAUM\PotPlayer\PotPlayerMini64.exe`, []string{stream}},
+		{filepath.Join("Program Files", "MPC-HC", "mpc-hc64.exe"), []string{stream}},
+		{filepath.Join("Program Files", "DAUM", "PotPlayer", "PotPlayerMini64.exe"), []string{stream}},
 	}
 	for _, tt := range tests {
 		got, err := Args(tt.exe, "BBC One\x07 HD", stream, opts)
