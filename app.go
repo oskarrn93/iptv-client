@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -30,8 +28,7 @@ type App struct {
 	svc     *services
 	initErr error
 
-	importMu     sync.Mutex
-	cancelImport context.CancelFunc // non-nil while an import runs
+	imports importGuard
 }
 
 // services are the domain services the bound methods call.
@@ -188,7 +185,7 @@ func (a *App) add(name, source string) (ImportResult, error) {
 	if err != nil {
 		return ImportResult{}, err
 	}
-	ctx, done, err := a.beginImport()
+	ctx, done, err := a.imports.begin(a.ctx)
 	if err != nil {
 		return ImportResult{}, err
 	}
@@ -208,7 +205,7 @@ func (a *App) RefreshPlaylist(id int64, force bool) (ImportResult, error) {
 	if err != nil {
 		return ImportResult{}, err
 	}
-	ctx, done, err := a.beginImport()
+	ctx, done, err := a.imports.begin(a.ctx)
 	if err != nil {
 		return ImportResult{}, err
 	}
@@ -230,13 +227,7 @@ func (a *App) RefreshPlaylist(id int64, force bool) (ImportResult, error) {
 }
 
 // CancelImport stops a running add/refresh. The previous data is kept.
-func (a *App) CancelImport() {
-	a.importMu.Lock()
-	defer a.importMu.Unlock()
-	if a.cancelImport != nil {
-		a.cancelImport()
-	}
-}
+func (a *App) CancelImport() { a.imports.stop() }
 
 // RenamePlaylist changes a playlist's name.
 func (a *App) RenamePlaylist(id int64, name string) error {
@@ -411,23 +402,6 @@ func (a *App) SetUserAgent(ua string) error {
 }
 
 // --- helpers ---
-
-// beginImport allows one import at a time and returns its cancellable context.
-func (a *App) beginImport() (context.Context, func(), error) {
-	a.importMu.Lock()
-	defer a.importMu.Unlock()
-	if a.cancelImport != nil {
-		return nil, nil, errors.New("another playlist is being imported; wait for it to finish")
-	}
-	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Minute)
-	a.cancelImport = cancel
-	return ctx, func() {
-		a.importMu.Lock()
-		defer a.importMu.Unlock()
-		cancel()
-		a.cancelImport = nil
-	}, nil
-}
 
 func (a *App) progress(n int) { runtime.EventsEmit(a.ctx, ImportProgressEvent, n) }
 
