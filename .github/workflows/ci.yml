@@ -3,9 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
   workflow_dispatch:
+  # build.yml runs these checks before building release binaries.
+  workflow_call:
 
 permissions:
   contents: read
@@ -48,81 +49,17 @@ jobs:
         env:
           E2E_BROWSER: chrome
 
-  build-windows:
-    needs: [test, frontend]
+  # Release binaries are built by build.yml. This job keeps the Windows-only
+  # checks on PRs, e.g. so a Dependabot Wails bump that changes bindings fails.
+  windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
       - run: go test ./...
-      - name: Determine version
-        shell: bash
-        run: echo "VERSION=$( [[ $GITHUB_REF == refs/tags/v* ]] && echo $GITHUB_REF_NAME || echo dev-${GITHUB_SHA::7} )" >> "$GITHUB_ENV"
-      # -trimpath; no UPX (packed binaries trigger antivirus false positives).
-      - run: go tool wails build -clean -trimpath -ldflags "-X main.version=${{ env.VERSION }}"
-      # wails build regenerates frontend/wailsjs; committed copies must match.
+      - run: go tool wails generate module
+      # Committed bindings must match the exported Go API.
       - name: Check generated bindings are committed
         run: git diff --exit-code -- frontend/wailsjs
-      - uses: actions/upload-artifact@v4
-        with:
-          name: iptv-client-windows-amd64
-          path: build/bin/iptv-client.exe
-
-  # macOS runners cost 10x Actions minutes on private repos: tags/manual only.
-  build-macos:
-    needs: [test, frontend]
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - name: Determine version
-        run: echo "VERSION=$( [[ $GITHUB_REF == refs/tags/v* ]] && echo $GITHUB_REF_NAME || echo dev-${GITHUB_SHA::7} )" >> "$GITHUB_ENV"
-      - run: go tool wails build -clean -trimpath -platform darwin/universal -ldflags "-X main.version=${{ env.VERSION }}"
-      # Ad-hoc signature (no developer account needed); required on Apple Silicon.
-      - run: codesign --force --deep --sign - build/bin/iptv-client.app
-      - run: ditto -c -k --keepParent build/bin/iptv-client.app iptv-client-macos-universal.zip
-      - uses: actions/upload-artifact@v4
-        with:
-          name: iptv-client-macos-universal
-          path: iptv-client-macos-universal.zip
-
-  release:
-    needs: [build-windows, build-macos]
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      # The tag must match the version baked into the app metadata.
-      - name: Check tag matches wails.json productVersion
-        run: |
-          want="v$(jq -r .info.productVersion wails.json)"
-          [ "$GITHUB_REF_NAME" = "$want" ] || { echo "tag $GITHUB_REF_NAME != $want (wails.json)"; exit 1; }
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-      - run: |
-          cd dist
-          (cd iptv-client-windows-amd64 && zip -q ../iptv-client-windows-amd64.zip iptv-client.exe)
-          # Install instructions first, then GitHub's generated changelog.
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-            --notes-file ../.github/release-notes.md --generate-notes \
-            iptv-client-windows-amd64.zip iptv-client-macos-universal/iptv-client-macos-universal.zip
-        env:
-          GH_TOKEN: ${{ github.token }}

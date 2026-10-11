@@ -161,14 +161,15 @@ testing with large playlists without touching your own data. The app and
 
 ## CI and releases
 
-`.github/workflows/ci.yml`:
-
-- **Every push / PR:** format check, vet, race-enabled tests and 60 s of
-  fuzzing on Linux; frontend HTML-sink check and UI tests in Chrome; Windows
-  build (with a check that committed bindings are current) uploaded as an
-  artifact.
-- **Tags `v*` (or manual run):** additionally a macOS universal build,
-  ad-hoc signed, and a GitHub Release with both zips.
+- **`.github/workflows/ci.yml`, every PR and push to `main` (or manual
+  run):** format check,
+  vet, race-enabled tests and 60 s of fuzzing on Linux; frontend HTML-sink
+  check and UI tests in Chrome; Go tests on Windows and a check that the
+  committed bindings are current.
+- **`.github/workflows/build.yml`, tags `v*` (or manual run):** runs `ci.yml`
+  first, then builds Windows and macOS universal (ad-hoc signed) binaries,
+  uploads them as artifacts and, on tags, creates a GitHub Release with both
+  zips.
 
 `.github/dependabot.yml` opens weekly PRs for Go modules, frontend npm
 packages and GitHub Actions. Minor/patch bumps are grouped into one PR per
