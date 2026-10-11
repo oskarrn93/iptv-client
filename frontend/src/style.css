@@ -500,6 +500,13 @@ dialog legend {
   display: flex;
   gap: 8px;
 }
+.version-row {
+  align-items: center;
+  justify-content: space-between;
+}
+.version-row button {
+  flex-shrink: 0;
+}
 .player-status {
   word-break: break-all;
   user-select: text;

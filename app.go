@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
+	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -16,6 +17,7 @@ import (
 	"iptv-client/internal/player"
 	"iptv-client/internal/playlist"
 	"iptv-client/internal/setting"
+	"iptv-client/internal/update"
 )
 
 // App is bound to the frontend. Every exported method is callable from
@@ -29,6 +31,7 @@ type App struct {
 	initErr error
 
 	imports importGuard
+	updater *update.Updater
 }
 
 // services are the domain services the bound methods call.
@@ -48,7 +51,9 @@ func newServices(db *database.DB) *services {
 }
 
 // NewApp creates the application.
-func NewApp() *App { return &App{} }
+func NewApp() *App {
+	return &App{updater: &update.Updater{Current: version, UserAgent: "iptv-client/" + version}}
+}
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
@@ -137,8 +142,18 @@ type Settings struct {
 	Version        string `json:"version"`
 }
 
+// UpdateInfo reports an update check.
+type UpdateInfo struct {
+	Latest    string `json:"latest"`
+	Available bool   `json:"available"`
+}
+
 // ImportProgressEvent is emitted while importing with the running count.
 const ImportProgressEvent = "import-progress"
+
+// UpdateProgressEvent is emitted while downloading an update with the
+// percentage done.
+const UpdateProgressEvent = "update-progress"
 
 // --- playlists ---
 
@@ -399,6 +414,37 @@ func (a *App) SetUserAgent(ua string) error {
 		return err
 	}
 	return svc.settings.SetUserAgent(a.ctx, ua)
+}
+
+// --- updates ---
+// These do not need the database, so they also work when it failed to open.
+
+// CheckForUpdate looks up the latest release. InstallUpdate installs it if
+// it is newer than the running version.
+func (a *App) CheckForUpdate() (UpdateInfo, error) {
+	ctx, cancel := context.WithTimeout(a.ctx, time.Minute)
+	defer cancel()
+	r, newer, err := a.updater.Check(ctx)
+	if err != nil {
+		return UpdateInfo{}, err
+	}
+	return UpdateInfo{Latest: r.Version, Available: newer}, nil
+}
+
+// InstallUpdate downloads the release found by CheckForUpdate, starts its
+// installation and quits the app, which restarts on the new version.
+func (a *App) InstallUpdate() error {
+	// Generous, so slow connections can still finish the download.
+	ctx, cancel := context.WithTimeout(a.ctx, time.Hour)
+	defer cancel()
+	err := a.updater.Install(ctx, func(pct int) {
+		runtime.EventsEmit(a.ctx, UpdateProgressEvent, pct)
+	})
+	if err != nil {
+		return err
+	}
+	runtime.Quit(a.ctx)
+	return nil
 }
 
 // --- helpers ---

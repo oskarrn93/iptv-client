@@ -139,6 +139,20 @@ export namespace main {
 	        this.version = source["version"];
 	    }
 	}
+	export class UpdateInfo {
+	    latest: string;
+	    available: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.latest = source["latest"];
+	        this.available = source["available"];
+	    }
+	}
 
 }
 

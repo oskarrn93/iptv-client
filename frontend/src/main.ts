@@ -5,10 +5,12 @@ import {
   AddPlaylistURL,
   CancelImport,
   ChannelIDs,
+  CheckForUpdate,
   ChoosePlayer,
   CopyStreamURL,
   DeletePlaylist,
   GetSettings,
+  InstallUpdate,
   ListGroups,
   ListPlaylists,
   Play,
@@ -411,6 +413,52 @@ const deletePlaylist = guard(async (p: main.Playlist) => {
 
 // ---------- settings ----------
 
+/** "Check for updates…": finds a newer release and offers to install it. */
+const updateButton = (current: string): HTMLButtonElement => {
+  const label = 'Check for updates…';
+  const button = h('button', { type: 'button', class: 'small' }, label);
+  const busy = (text: string) => {
+    button.disabled = true;
+    button.textContent = text;
+  };
+  const done = () => {
+    button.disabled = false;
+    button.textContent = label;
+  };
+  let restarting = false;
+  button.addEventListener('click', async () => {
+    busy('Checking…');
+    try {
+      const info = await CheckForUpdate();
+      if (!info.available) {
+        toast(`You have the latest version (${current}).`, 'info');
+        return;
+      }
+      const ok = await confirmDialog(
+        `Update to ${info.latest}?`,
+        `IPTV Client ${info.latest} is available (you have ${current}).` +
+          'It will be downloaded and installed, and the app will restart.',
+        'Install and restart',
+      );
+      if (!ok) return;
+      busy('Downloading…');
+      const stop = EventsOn('update-progress', (pct: number) => busy(`Downloading… ${pct}%`));
+      try {
+        await InstallUpdate();
+        restarting = true;
+        busy('Restarting…');
+      } finally {
+        stop();
+      }
+    } catch (error) {
+      fail(error);
+    } finally {
+      if (!restarting) done();
+    }
+  });
+  return button;
+};
+
 const openSettings = async (): Promise<void> => {
   let settings: main.Settings;
   try {
@@ -471,7 +519,12 @@ const openSettings = async (): Promise<void> => {
         h('label', null, 'User-Agent', userAgent),
         h('p', { class: 'hint' }, 'Some providers only accept specific players. Leave empty for the default.'),
       ),
-      h('p', { class: 'hint' }, `IPTV Client ${settings.version} · Data folder: ${settings.dataDir}`),
+      h(
+        'div',
+        { class: 'row version-row' },
+        h('p', { class: 'hint' }, `IPTV Client ${settings.version} · Data folder: ${settings.dataDir}`),
+        updateButton(settings.version),
+      ),
     ],
     [
       { label: 'Cancel', value: '' },

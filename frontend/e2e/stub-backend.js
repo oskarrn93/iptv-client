@@ -139,6 +139,19 @@
       if (/[\r\n]/.test(ua)) throw 'invalid User-Agent';
       window.__userAgent = ua;
     },
+    // window.__latest sets the newest release; defaults to the running one.
+    async CheckForUpdate() {
+      await delay();
+      const latest = window.__latest ?? 'v0.0.0-test';
+      return { latest, available: latest !== 'v0.0.0-test' };
+    },
+    async InstallUpdate() {
+      for (const pct of [10, 50, 100]) {
+        await delay();
+        emit('update-progress', pct);
+      }
+      window.__installed = true;
+    },
   };
 
   window.go = { main: { App: api } };

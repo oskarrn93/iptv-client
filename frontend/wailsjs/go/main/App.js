@@ -22,6 +22,10 @@ export function Channels(arg1) {
   return window['go']['main']['App']['Channels'](arg1);
 }
 
+export function CheckForUpdate() {
+  return window['go']['main']['App']['CheckForUpdate']();
+}
+
 export function ChoosePlayer() {
   return window['go']['main']['App']['ChoosePlayer']();
 }
@@ -36,6 +40,10 @@ export function DeletePlaylist(arg1) {
 
 export function GetSettings() {
   return window['go']['main']['App']['GetSettings']();
+}
+
+export function InstallUpdate() {
+  return window['go']['main']['App']['InstallUpdate']();
 }
 
 export function ListGroups(arg1) {

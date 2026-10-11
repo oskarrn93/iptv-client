@@ -218,6 +218,22 @@ try {
   await page.waitForSelector('dialog[open]', { state: 'detached' });
   check('settings save', (await page.evaluate(() => window.__userAgent)) === 'MyPlayer/1.0');
 
+  // Updates: up to date, then a newer release confirmed and installed.
+  await page.click('#settings-button');
+  await page.click('dialog[open] button:has-text("Check for updates")');
+  await page.waitForSelector('.toast.info');
+  check('up to date', (await page.textContent('.toast.info')).includes('latest version (v0.0.0-test)'));
+  await page.evaluate(() => (window.__latest = 'v9.9.9'));
+  await page.click('dialog[open] button:has-text("Check for updates")');
+  await waitFor(() => document.querySelectorAll('dialog[open]').length === 2);
+  check('update offered', (await page.textContent('dialog[open] >> nth=1')).includes('v9.9.9 is available'));
+  await shot('05b-update');
+  await page.click('dialog[open] button:has-text("Install and restart")');
+  await waitFor(() => window.__installed && document.querySelector('.version-row button')?.textContent === 'Restarting…');
+  check('update installed', true);
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('dialog[open]', { state: 'detached' });
+
   // Add playlist: validation, server error, success with progress.
   await page.click('#add-playlist');
   await page.waitForSelector('dialog[open]');

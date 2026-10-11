@@ -12,6 +12,8 @@ export function ChannelIDs(arg1:main.ChannelQuery):Promise<Array<number>>;
 
 export function Channels(arg1:Array<number>):Promise<Array<main.Channel>>;
 
+export function CheckForUpdate():Promise<main.UpdateInfo>;
+
 export function ChoosePlayer():Promise<main.Settings>;
 
 export function CopyStreamURL(arg1:number):Promise<void>;
@@ -19,6 +21,8 @@ export function CopyStreamURL(arg1:number):Promise<void>;
 export function DeletePlaylist(arg1:number):Promise<void>;
 
 export function GetSettings():Promise<main.Settings>;
+
+export function InstallUpdate():Promise<void>;
 
 export function ListGroups(arg1:number):Promise<Array<main.Group>>;
 
