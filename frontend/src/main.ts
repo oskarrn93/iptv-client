@@ -453,7 +453,7 @@ const openSettings = async (): Promise<void> => {
         h('label', null, 'User-Agent', userAgent),
         h('p', { class: 'hint' }, 'Some providers only accept specific players. Leave empty for the default.'),
       ),
-      h('p', { class: 'hint' }, `Data folder: ${settings.dataDir}`),
+      h('p', { class: 'hint' }, `IPTV Client ${settings.version} · Data folder: ${settings.dataDir}`),
     ],
     [
       { label: 'Cancel', value: '' },

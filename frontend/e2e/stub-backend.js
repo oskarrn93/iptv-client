@@ -121,6 +121,7 @@
         userAgent: window.__userAgent ?? '',
         defaultAgent: 'VLC/3.0.21 LibVLC/3.0.21',
         dataDir: 'C:\\Users\\test\\AppData\\Roaming\\IPTVClient',
+        version: 'v0.0.0-test',
       };
     },
     async ChooseVLC() {

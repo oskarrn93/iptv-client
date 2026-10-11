@@ -115,6 +115,7 @@ type Settings struct {
 	UserAgent    string `json:"userAgent"`    // "" = default
 	DefaultAgent string `json:"defaultAgent"` // shown as placeholder
 	DataDir      string `json:"dataDir"`
+	Version      string `json:"version"`
 }
 
 // ImportProgressEvent is emitted while importing with the running count.
@@ -320,7 +321,7 @@ func (a *App) GetSettings() (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
-	s := Settings{VLCOverride: override != "", UserAgent: ua, DefaultAgent: fetch.DefaultUserAgent}
+	s := Settings{VLCOverride: override != "", UserAgent: ua, DefaultAgent: fetch.DefaultUserAgent, Version: version}
 	if s.VLCPath, err = l.VLCPath(a.ctx); err != nil {
 		s.VLCError = err.Error()
 	}

@@ -161,6 +161,7 @@ try {
   await page.click('#settings-button');
   await page.waitForSelector('dialog[open] .vlc-status.ok');
   check('settings shows VLC', (await page.textContent('dialog[open] .vlc-status')).includes('vlc.exe'));
+  check('settings shows version', (await page.textContent('dialog[open]')).includes('IPTV Client v0.0.0-test'));
   await page.fill('dialog[open] input', 'MyPlayer/1.0');
   await shot('05-settings');
   await page.click('dialog[open] button:has-text("Save")');

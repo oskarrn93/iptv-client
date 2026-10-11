@@ -120,6 +120,7 @@ export namespace main {
 	    userAgent: string;
 	    defaultAgent: string;
 	    dataDir: string;
+	    version: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -133,6 +134,7 @@ export namespace main {
 	        this.userAgent = source["userAgent"];
 	        this.defaultAgent = source["defaultAgent"];
 	        this.dataDir = source["dataDir"];
+	        this.version = source["version"];
 	    }
 	}
 
