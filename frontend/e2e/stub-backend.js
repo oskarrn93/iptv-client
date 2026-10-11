@@ -1,0 +1,150 @@
+// In-memory stand-in for the Go backend (window.go.main.App) and the Wails
+// runtime, so the built frontend can be tested in a normal browser. It
+// mirrors the behaviour of app.go closely enough for UI tests; the real Go
+// code has its own unit tests. Loaded as a classic script before the app.
+(() => {
+  const groupsOf = (n) => n % 120;
+  const channels = new Map(); // id -> {id, playlistId, name, group, tvgId}
+  const favorites = new Set(); // `${playlistId}|${tvgId}|${name}`
+  const playlists = [];
+  let nextId = 1;
+  let nextPlaylist = 1;
+  const listeners = new Map();
+  const now = () => Math.floor(Date.now() / 1000);
+
+  const addPlaylist = (name, sourceType, source, entries) => {
+    const id = nextPlaylist++;
+    for (const e of entries) {
+      const cid = nextId++;
+      channels.set(cid, { id: cid, playlistId: id, position: cid, ...e });
+    }
+    const p = { id, name, sourceType, source, channelCount: entries.length, lastRefreshedAt: now() };
+    playlists.push(p);
+    return p;
+  };
+
+  const big = [
+    { name: '<img src=x onerror="window.__xss=1">Evil Channel', group: '<b>Bold Group</b>', tvgId: 'xss' },
+    { name: 'Mux Test Stream', group: 'Test', tvgId: '' },
+  ];
+  for (let i = 1; i <= 50000; i++) {
+    big.push({ name: `Kanal ${i} HD Ünïcödé`, group: `Group ${groupsOf(i)} Sport & Nyheter`, tvgId: `c${i}` });
+  }
+  addPlaylist('Big Test List', 'url', 'http://provider.example/…', big);
+  addPlaylist('Small List', 'file', 'C:\\lists\\small.m3u', [
+    { name: 'BBC One HD', group: 'UK', tvgId: 'bbc1' },
+    { name: 'BBC One SD', group: 'UK', tvgId: 'bbc1' },
+    { name: 'CNN', group: 'News', tvgId: 'cnn' },
+  ]);
+
+  const fold = (s) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+  const favKey = (c) => `${c.playlistId}|${c.tvgId}|${c.name.toLowerCase()}`;
+  const byPlaylist = (pid) => [...channels.values()].filter((c) => c.playlistId === pid);
+  const delay = (ms = 5) => new Promise((r) => setTimeout(r, ms));
+  const emit = (name, ...args) => (listeners.get(name) ?? []).forEach((cb) => cb(...args));
+  const playlist = (id) => {
+    const p = playlists.find((x) => x.id === id);
+    if (!p) throw 'playlist not found';
+    return p;
+  };
+
+  window.__calls = [];
+  const api = {
+    async ListPlaylists() {
+      return [...playlists].sort((a, b) => a.name.localeCompare(b.name));
+    },
+    async ListGroups(pid) {
+      const groups = new Map();
+      for (const c of byPlaylist(pid)) groups.set(c.group, (groups.get(c.group) ?? 0) + 1);
+      return [...groups].map(([name, count]) => ({ name, count }));
+    },
+    async ChannelIDs(q) {
+      const terms = fold(q.search).split(/\s+/).filter(Boolean);
+      return byPlaylist(q.playlistId)
+        .filter((c) => q.allGroups || c.group === q.group)
+        .filter((c) => !q.favoritesOnly || favorites.has(favKey(c)))
+        .filter((c) => {
+          const words = fold(`${c.name} ${c.group}`).split(/[^\p{L}\p{N}]+/u);
+          return terms.every((t) => words.some((w) => w.startsWith(t)));
+        })
+        .map((c) => c.id);
+    },
+    async Channels(ids) {
+      if (ids.length > 500) throw 'at most 500 ids per request';
+      await delay();
+      return ids
+        .map((id) => channels.get(id))
+        .filter(Boolean)
+        .map((c) => ({ id: c.id, name: c.name, group: c.group, favorite: favorites.has(favKey(c)) }));
+    },
+    async SetFavorite(id, on) {
+      const c = channels.get(id);
+      if (on) favorites.add(favKey(c));
+      else favorites.delete(favKey(c));
+    },
+    async Play(id) {
+      window.__calls.push(['Play', id]);
+    },
+    async RenamePlaylist(id, name) {
+      playlist(id).name = name;
+    },
+    async DeletePlaylist(id) {
+      playlists.splice(playlists.indexOf(playlist(id)), 1);
+      for (const c of byPlaylist(id)) channels.delete(c.id);
+    },
+    async AddPlaylistURL(name, url) {
+      if (!/^https?:\/\//i.test(url)) throw 'only http:// and https:// playlist URLs are supported';
+      for (const n of [1000, 2000]) {
+        await delay(50);
+        emit('import-progress', n);
+      }
+      const entries = Array.from({ length: 2500 }, (_, i) => ({ name: `New ${i}`, group: 'Imported', tvgId: '' }));
+      const p = addPlaylist(name || 'provider.example', 'url', 'http://provider.example/…', entries);
+      return { playlist: p, imported: 2500, skipped: 3, notModified: false, tooSoonMinutes: 0 };
+    },
+    async AddPlaylistFile() {
+      return { playlist: null, imported: 0, skipped: 0, notModified: false, tooSoonMinutes: 0 }; // cancelled
+    },
+    async RefreshPlaylist(id, force) {
+      const p = playlist(id);
+      window.__calls.push(['RefreshPlaylist', id, force]);
+      if (p.sourceType === 'url' && !force) return { playlist: null, imported: 0, skipped: 0, notModified: false, tooSoonMinutes: 42 };
+      p.lastRefreshedAt = now();
+      return { playlist: p, imported: p.channelCount, skipped: 0, notModified: false, tooSoonMinutes: 0 };
+    },
+    async CancelImport() {},
+    async GetSettings() {
+      return {
+        vlcPath: 'C:\\Program Files\\VideoLAN\\VLC\\vlc.exe',
+        vlcOverride: false,
+        vlcError: '',
+        userAgent: window.__userAgent ?? '',
+        defaultAgent: 'VLC/3.0.21 LibVLC/3.0.21',
+        dataDir: 'C:\\Users\\test\\AppData\\Roaming\\IPTVClient',
+      };
+    },
+    async ChooseVLC() {
+      return api.GetSettings();
+    },
+    async ResetVLC() {
+      return api.GetSettings();
+    },
+    async SetUserAgent(ua) {
+      if (/[\r\n]/.test(ua)) throw 'invalid User-Agent';
+      window.__userAgent = ua;
+    },
+  };
+
+  window.go = { main: { App: api } };
+  window.runtime = {
+    EventsOnMultiple(name, cb) {
+      const list = listeners.get(name) ?? [];
+      list.push(cb);
+      listeners.set(name, list);
+      return () => listeners.set(name, (listeners.get(name) ?? []).filter((x) => x !== cb));
+    },
+    EventsOff(name) {
+      listeners.delete(name);
+    },
+  };
+})();

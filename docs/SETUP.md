@@ -59,9 +59,17 @@ What we observed:
 
 - `go install …/wails` produced a `wails.exe` that was **blocked**. That is why
   the CLI is pinned as a Go tool and run via `go tool wails` (which works).
-- `go test` and the built `build/bin/iptv-client.exe` ran fine.
+- `go test` and the built `build/bin/iptv-client.exe` usually ran fine.
 - The **fuzz** test binary (`go test -fuzz`) was blocked. Fuzzing runs in CI on
   Linux instead.
+- Wails' temporary **binding generator** (`wailsbindings.exe`) was blocked on
+  some builds. When the exported Go API has not changed, build with
+  `go tool wails build -skipbindings`. CI fails if committed bindings are stale.
+- The **`wails dev`** binary was blocked, so hot reload did not work on the
+  reference machine. Use the browser-based UI tests (below) and production
+  builds instead.
+- Whether a given binary is allowed can change with build flags; one build
+  without `-trimpath` ran where the `-trimpath` build was blocked.
 
 Smart App Control decides per binary, so other builds may be hit. Options if
 something you build is blocked: run that step in CI, or turn Smart App Control
@@ -102,10 +110,26 @@ Run from the repository root.
 | Unit tests (core) | `go test ./internal/... ./cmd/...` |
 | Skip the 200k-row performance test | `go test -short ./internal/...` |
 | Fuzz the parser (Linux/macOS) | `go test ./internal/m3u -run '^$' -fuzz FuzzParse -fuzztime 60s` |
-| Format check | `gofmt -l cmd internal` (should print nothing) |
+| UI tests (headless Edge) | `cd frontend && npm run test:e2e` |
+| UI tests with Chrome / screenshots | `E2E_BROWSER=chrome E2E_SCREENSHOTS=./shots npm run test:e2e` |
+| Regenerate TS bindings after changing `app.go` | `go tool wails generate module` (commit `frontend/wailsjs`) |
+| Format check | `gofmt -l .` (should print nothing) |
 | Debug CLI (no GUI) | `go run ./cmd/iptv-debug -h` |
+| Run the app on a scratch database | `IPTV_CLIENT_DB=./scratch.db build/bin/iptv-client.exe` |
 
 Do not use `-upx`: compressed binaries are a common antivirus false-positive trigger.
+
+### UI tests
+
+`frontend/e2e/run.mjs` builds `frontend/dist` (with the production
+Content-Security-Policy), serves it, and drives it in an installed Edge or
+Chrome via `playwright-core` (no browser download). The Go backend is replaced
+by an in-memory stub (`frontend/e2e/stub-backend.js`) holding 50,000 channels,
+including channel names with HTML in them to catch XSS regressions. The real Go
+code is covered by the Go unit tests.
+
+Playwright's `waitForFunction` does not work under the production CSP, which
+forbids evaluating strings, so the tests use their own `waitFor` helper instead.
 
 ### Debug CLI
 
@@ -131,12 +155,17 @@ go run ./cmd/iptv-debug vlc        # which VLC would be used
 Playlist URLs (which often contain your provider username and password) are
 stored **unencrypted** in this file.
 
+Set `IPTV_CLIENT_DB` to a file path to use a different database, e.g. for
+testing with large playlists without touching your own data.
+
 ## CI and releases
 
 `.github/workflows/ci.yml`:
 
 - **Every push / PR:** format check, vet, race-enabled tests and 60 s of
-  fuzzing on Linux; Windows build uploaded as an artifact.
+  fuzzing on Linux; frontend HTML-sink check and UI tests in Chrome; Windows
+  build (with a check that committed bindings are current) uploaded as an
+  artifact.
 - **Tags `v*` (or manual run):** additionally a macOS universal build,
   ad-hoc signed, and a GitHub Release with both zips.
 
@@ -167,5 +196,8 @@ The app is not code-signed (no paid developer account).
 | Tests | ✅ | ⏳ (CI) |
 | App build + window opens | ✅ | ⏳ (CI on tags) |
 | VLC detection + playback | ✅ (registry lookup) | ⏳ |
+| UI tests (`npm run test:e2e`) | ✅ Edge, 31/31 | ⏳ (CI runs them in Chrome on Linux) |
+| App renders real data (50k channels) | ✅ | ⏳ |
+| `go tool wails dev` | ❌ blocked by Smart App Control | ⏳ |
 
 Update this table when you verify a step on a new platform.

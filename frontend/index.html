@@ -1,12 +1,52 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8"/>
-    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-    <title>iptv-client</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IPTV Client</title>
+  <link rel="icon" href="data:," />
 </head>
 <body>
-<div id="app"></div>
-<script src="./src/main.ts" type="module"></script>
+  <header class="toolbar">
+    <h1 class="app-title">IPTV Client</h1>
+    <label class="search">
+      <span class="visually-hidden">Search channels</span>
+      <input id="search" type="search" placeholder="Search channels  (Ctrl+F)" autocomplete="off" spellcheck="false" disabled />
+    </label>
+    <button id="settings-button" class="ghost" type="button" title="Settings">Settings</button>
+  </header>
+
+  <div class="panes">
+    <aside class="pane playlists-pane" aria-label="Playlists">
+      <div class="pane-header">
+        <h2>Playlists</h2>
+        <button id="add-playlist" class="small" type="button">+ Add</button>
+      </div>
+      <ul id="playlists" class="list" role="listbox" aria-label="Playlists"></ul>
+    </aside>
+
+    <nav class="pane groups-pane" aria-label="Groups">
+      <div class="pane-header"><h2>Groups</h2></div>
+      <ul id="groups" class="list" role="listbox" aria-label="Groups"></ul>
+    </nav>
+
+    <main class="pane channels-pane">
+      <div class="pane-header">
+        <h2 id="channels-title">Channels</h2>
+        <span id="channels-count" class="muted"></span>
+      </div>
+      <div id="channels" class="channel-list" tabindex="0" role="listbox" aria-label="Channels"></div>
+      <div id="empty" class="empty" hidden></div>
+    </main>
+  </div>
+
+  <footer class="statusbar">
+    <span id="status" role="status"></span>
+    <button id="cancel-import" class="link" type="button" hidden>Cancel</button>
+  </footer>
+
+  <div id="toasts" class="toasts" aria-live="assertive"></div>
+
+  <script type="module" src="./src/main.ts"></script>
 </body>
 </html>

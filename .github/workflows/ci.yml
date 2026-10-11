@@ -21,13 +21,34 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: test -z "$(gofmt -l cmd internal)" || (gofmt -l cmd internal; exit 1)
+      - run: test -z "$(gofmt -l .)" || (gofmt -l .; exit 1)
       - run: go vet ./internal/... ./cmd/...
       - run: go test -race ./internal/... ./cmd/...
       - run: go test ./internal/m3u -run '^$' -fuzz FuzzParse -fuzztime 60s
 
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # Untrusted playlist text must never be parsed as HTML (C3 in the review).
+      - name: Reject HTML sinks
+        run: "! grep -rnE 'innerHTML|outerHTML|insertAdjacentHTML|document\.write|\beval\(|new Function' src"
+      - run: npm ci
+      # Builds dist (with the production CSP) and drives it in Chrome.
+      - run: npm run test:e2e
+        env:
+          E2E_BROWSER: chrome
+
   build-windows:
-    needs: test
+    needs: [test, frontend]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,6 +63,9 @@ jobs:
       - run: go test ./...
       # -trimpath; no UPX (packed binaries trigger antivirus false positives).
       - run: go tool wails build -clean -trimpath
+      # wails build regenerates frontend/wailsjs; committed copies must match.
+      - name: Check generated bindings are committed
+        run: git diff --exit-code -- frontend/wailsjs
       - uses: actions/upload-artifact@v4
         with:
           name: iptv-client-windows-amd64
@@ -49,7 +73,7 @@ jobs:
 
   # macOS runners cost 10x Actions minutes on private repos: tags/manual only.
   build-macos:
-    needs: test
+    needs: [test, frontend]
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     steps:

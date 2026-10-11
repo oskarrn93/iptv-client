@@ -7,7 +7,8 @@ lets you browse them by group, search them, and opens channels in
 Built with Go, [Wails](https://wails.io) (native window and system webview)
 and SQLite.
 
-> **Status:** core library and debug CLI are done; the GUI is in progress.
+> **Status:** core library, debug CLI and GUI are working on Windows; macOS
+> builds are produced by CI but not yet verified on a Mac.
 
 ## Features
 
@@ -36,7 +37,8 @@ Playlist URLs are stored unencrypted in the local database.
 
 ```
 main.go, app.go        Wails entry point and GUI bindings
-frontend/              UI (Vite + TypeScript)
+frontend/              UI (Vite + TypeScript, no framework)
+frontend/e2e           UI tests against a stubbed backend
 internal/m3u           streaming playlist parser
 internal/store         SQLite storage, search, favorites
 internal/fetch         playlist download (size cap, ETag, credential-safe errors)
