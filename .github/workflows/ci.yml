@@ -58,6 +58,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      # main.go embeds frontend/dist, which is only built by wails build.
+      - name: Create placeholder frontend/dist
+        shell: bash
+        run: mkdir -p frontend/dist && touch frontend/dist/gitkeep
       - run: go test ./...
       - run: go tool wails generate module
       # Committed bindings must match the exported Go API.
