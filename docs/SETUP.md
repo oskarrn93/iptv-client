@@ -181,17 +181,19 @@ repo under **Settings → Code security** (the config file can't enable them).
 
 ### Making a release
 
-1. Set the new version in `wails.json` → `info.productVersion` (e.g. `0.2.0`)
-   and commit. The release job refuses tags that don't match it.
-2. Tag and push:
+1. Tag and push (the tag must be `vX.Y.Z`):
    ```bash
    git tag v0.2.0 && git push origin v0.2.0
    ```
-3. CI builds Windows and macOS, stamps the tag into the app (shown in
-   Settings), and creates a GitHub Release with both zips. The install notes
-   in `.github/release-notes.md` come first, followed by GitHub's generated changelog.
+2. CI builds Windows and macOS and stamps the tag into the app: into the
+   version shown in Settings (`-X main.version`), and into `wails.json` →
+   `info.productVersion` (`.github/stamp-version.js`), which becomes the
+   Windows file version and the macOS bundle version. It then creates a GitHub
+   Release with both zips. The install notes in `.github/release-notes.md`
+   come first, followed by GitHub's generated changelog.
 
-Local builds show version `dev` unless you pass
+The committed `productVersion` stays at the `0.0.0` placeholder. Don't bump it
+by hand. Local builds show version `dev` unless you pass
 `-ldflags "-X main.version=v0.2.0"` to `go tool wails build`.
 
 ### App icon and metadata
