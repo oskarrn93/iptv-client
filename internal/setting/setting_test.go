@@ -56,24 +56,24 @@ func TestSetUserAgent(t *testing.T) {
 	}
 }
 
-func TestSetVLCPath(t *testing.T) {
+func TestSetPlayerPath(t *testing.T) {
 	ctx := context.Background()
 	svc := newService(t)
 	dir := t.TempDir()
 	evil := filepath.Join(dir, "cmd.exe")
 	os.WriteFile(evil, nil, 0o755)
-	if err := svc.SetVLCPath(ctx, evil); err == nil {
-		t.Error("non-VLC path accepted")
+	if err := svc.SetPlayerPath(ctx, evil); err == nil {
+		t.Error("unsupported player accepted")
 	}
 	vlc := filepath.Join(dir, "vlc.exe")
 	os.WriteFile(vlc, nil, 0o755)
-	if err := svc.SetVLCPath(ctx, vlc); err != nil {
+	if err := svc.SetPlayerPath(ctx, vlc); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := svc.VLCPath(ctx); err != nil || got != vlc {
-		t.Errorf("VLCPath = %q, %v", got, err)
+	if got, err := svc.PlayerPath(ctx); err != nil || got != vlc {
+		t.Errorf("PlayerPath = %q, %v", got, err)
 	}
-	if err := svc.SetVLCPath(ctx, ""); err != nil {
+	if err := svc.SetPlayerPath(ctx, ""); err != nil {
 		t.Fatal(err)
 	}
 }

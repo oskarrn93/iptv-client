@@ -123,7 +123,9 @@ try {
   await page.keyboard.press('Enter');
   await waitFor(() => document.querySelector('#status')?.textContent?.startsWith('Opened'));
   const played = await page.evaluate(() => window.__calls.filter(([m]) => m === 'Play').length);
-  check('keyboard: arrows select, F favorites, Enter plays', played === 1 && (await page.textContent('#status')).includes(selected), selected);
+  const status = await page.textContent('#status');
+  check('keyboard: arrows select, F favorites, Enter plays', played === 1 && status.includes(selected), selected);
+  check('status names the player', status.endsWith('in VLC'), status);
   check('arrow key moved past the first result', !selected.startsWith('Kanal 4999 '), selected);
 
   // Double-click plays too.
@@ -159,8 +161,8 @@ try {
 
   // Settings.
   await page.click('#settings-button');
-  await page.waitForSelector('dialog[open] .vlc-status.ok');
-  check('settings shows VLC', (await page.textContent('dialog[open] .vlc-status')).includes('vlc.exe'));
+  await page.waitForSelector('dialog[open] .player-status.ok');
+  check('settings shows player', (await page.textContent('dialog[open] .player-status')).includes('Detected VLC: '));
   check('settings shows version', (await page.textContent('dialog[open]')).includes('IPTV Client v0.0.0-test'));
   await page.fill('dialog[open] input', 'MyPlayer/1.0');
   await shot('05-settings');

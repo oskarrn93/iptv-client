@@ -1,5 +1,5 @@
-// Package setting stores and validates the user's settings: the VLC
-// location and the User-Agent used to download playlists.
+// Package setting stores and validates the user's settings: the media
+// player location and the User-Agent used to download playlists.
 package setting
 
 import (
@@ -13,8 +13,8 @@ import (
 
 // Setting keys.
 const (
-	KeyVLCPath   = "vlc_path"
-	KeyUserAgent = "user_agent"
+	KeyPlayerPath = "vlc_path" // named before players other than VLC were supported
+	KeyUserAgent  = "user_agent"
 )
 
 // Service reads and validates the user's settings.
@@ -27,17 +27,18 @@ func NewService(db *database.DB) *Service {
 	return &Service{repo: NewRepository(db)}
 }
 
-// Settings is the user-facing configuration with VLC resolved.
+// Settings is the user-facing configuration with the player resolved.
 type Settings struct {
-	VLCPath     string // "" if VLC was not found
-	VLCOverride bool   // VLCPath was chosen by the user
-	VLCError    error  // why VLC was not found
-	UserAgent   string // "" = fetch.DefaultUserAgent
+	PlayerPath     string // "" if no player was found
+	PlayerName     string // e.g. "VLC"; "" if no player was found
+	PlayerOverride bool   // PlayerPath was chosen by the user
+	PlayerError    error  // why no player was found
+	UserAgent      string // "" = fetch.DefaultUserAgent
 }
 
 // Get returns the current settings.
 func (s *Service) Get(ctx context.Context) (Settings, error) {
-	override, err := s.repo.Get(ctx, KeyVLCPath)
+	override, err := s.repo.Get(ctx, KeyPlayerPath)
 	if err != nil {
 		return Settings{}, err
 	}
@@ -45,32 +46,35 @@ func (s *Service) Get(ctx context.Context) (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
-	out := Settings{VLCOverride: override != "", UserAgent: ua}
-	out.VLCPath, out.VLCError = player.Find(override)
+	out := Settings{PlayerOverride: override != "", UserAgent: ua}
+	out.PlayerPath, out.PlayerError = player.Find(override)
+	if p, err := player.ForExecutable(out.PlayerPath); err == nil {
+		out.PlayerName = p.Name()
+	}
 	return out, nil
 }
 
-// VLCPath returns the configured VLC path, or the auto-detected one.
-func (s *Service) VLCPath(ctx context.Context) (string, error) {
-	override, err := s.repo.Get(ctx, KeyVLCPath)
+// PlayerPath returns the chosen player's path, or the auto-detected VLC.
+func (s *Service) PlayerPath(ctx context.Context) (string, error) {
+	override, err := s.repo.Get(ctx, KeyPlayerPath)
 	if err != nil {
 		return "", err
 	}
 	return player.Find(override)
 }
 
-// SetVLCPath stores a VLC location chosen by the user ("" = auto-detect).
-// A macOS VLC.app bundle is accepted. Only call this with a path the user
-// picked in a native file dialog.
-func (s *Service) SetVLCPath(ctx context.Context, path string) error {
+// SetPlayerPath stores a player location chosen by the user ("" =
+// auto-detect VLC). A macOS app bundle is accepted. Only call this with a
+// path the user picked in a native file dialog.
+func (s *Service) SetPlayerPath(ctx context.Context, path string) error {
 	if path == "" {
-		return s.repo.Delete(ctx, KeyVLCPath)
+		return s.repo.Delete(ctx, KeyPlayerPath)
 	}
 	path, err := player.ResolveExecutable(path)
 	if err != nil {
 		return err
 	}
-	return s.repo.Set(ctx, KeyVLCPath, path)
+	return s.repo.Set(ctx, KeyPlayerPath, path)
 }
 
 // UserAgent returns the User-Agent used to download playlists

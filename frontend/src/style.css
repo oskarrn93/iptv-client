@@ -465,13 +465,13 @@ dialog legend {
   display: flex;
   gap: 8px;
 }
-.vlc-status {
+.player-status {
   word-break: break-all;
   user-select: text;
 }
-.vlc-status.ok {
+.player-status.ok {
   color: var(--ok);
 }
-.vlc-status.error {
+.player-status.error {
   color: var(--danger);
 }

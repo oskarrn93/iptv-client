@@ -165,7 +165,7 @@ export class ChannelList {
         {
           class: 'play',
           type: 'button',
-          title: 'Play in VLC (Enter)',
+          title: 'Play (Enter)',
           dataset: { action: 'play' },
         },
         '▶ Play',

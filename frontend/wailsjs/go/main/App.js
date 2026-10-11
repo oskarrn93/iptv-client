@@ -22,8 +22,8 @@ export function Channels(arg1) {
   return window['go']['main']['App']['Channels'](arg1);
 }
 
-export function ChooseVLC() {
-  return window['go']['main']['App']['ChooseVLC']();
+export function ChoosePlayer() {
+  return window['go']['main']['App']['ChoosePlayer']();
 }
 
 export function DeletePlaylist(arg1) {
@@ -54,8 +54,8 @@ export function RenamePlaylist(arg1, arg2) {
   return window['go']['main']['App']['RenamePlaylist'](arg1, arg2);
 }
 
-export function ResetVLC() {
-  return window['go']['main']['App']['ResetVLC']();
+export function ResetPlayer() {
+  return window['go']['main']['App']['ResetPlayer']();
 }
 
 export function SetFavorite(arg1, arg2) {

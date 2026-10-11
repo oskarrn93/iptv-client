@@ -30,8 +30,8 @@ commands:
   search <playlist-id> <query>   full-text search
   fav <channel-id> on|off        set favorite
   favs <playlist-id>             list favorites
-  play <channel-id>              open in VLC
-  vlc                            show the VLC path that would be used
+  play <channel-id>              open in the configured player
+  player                         show the player path that would be used
 `
 
 func main() {
@@ -185,10 +185,14 @@ func run(ctx context.Context, svc *services, args []string) error {
 		if err := need(1); err != nil {
 			return err
 		}
-		return svc.channels.Play(ctx, id(0))
+		name, err := svc.channels.Play(ctx, id(0))
+		if err != nil {
+			return err
+		}
+		fmt.Println("opened in", name)
 
-	case "vlc":
-		p, err := svc.settings.VLCPath(ctx)
+	case "player":
+		p, err := svc.settings.PlayerPath(ctx)
 		if err != nil {
 			return err
 		}

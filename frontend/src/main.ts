@@ -5,7 +5,7 @@ import {
   AddPlaylistURL,
   CancelImport,
   ChannelIDs,
-  ChooseVLC,
+  ChoosePlayer,
   DeletePlaylist,
   GetSettings,
   ListGroups,
@@ -13,7 +13,7 @@ import {
   Play,
   RefreshPlaylist,
   RenamePlaylist,
-  ResetVLC,
+  ResetPlayer,
   SetFavorite,
   SetUserAgent,
 } from '../wailsjs/go/main/App';
@@ -79,8 +79,8 @@ const setStatus = (text: string): void => {
 
 const list = new ChannelList($('#channels'), {
   onPlay: guard(async (channel) => {
-    await Play(channel.id);
-    setStatus(`Opened “${channel.name}” in VLC`);
+    const player = await Play(channel.id);
+    setStatus(`Opened “${channel.name}” in ${player}`);
   }),
   onToggleFavorite: guard(async (channel) => {
     await SetFavorite(channel.id, !channel.favorite);
@@ -393,21 +393,21 @@ const openSettings = async (): Promise<void> => {
     fail(error);
     return;
   }
-  const vlcStatus = h('p', { class: 'vlc-status' });
-  const reset = h('button', { type: 'button', class: 'small' }, 'Use auto-detect');
-  const renderVLC = (s: main.Settings) => {
-    vlcStatus.className = `vlc-status ${s.vlcPath ? 'ok' : 'error'}`;
-    vlcStatus.textContent = s.vlcPath
-      ? `${s.vlcOverride ? 'Chosen' : 'Detected'}: ${s.vlcPath}`
-      : s.vlcError || 'VLC not found';
-    reset.hidden = !s.vlcOverride;
+  const playerStatus = h('p', { class: 'player-status' });
+  const reset = h('button', { type: 'button', class: 'small' }, 'Use VLC (auto-detect)');
+  const renderPlayer = (s: main.Settings) => {
+    playerStatus.className = `player-status ${s.playerPath ? 'ok' : 'error'}`;
+    playerStatus.textContent = s.playerPath
+      ? `${s.playerOverride ? 'Chosen' : 'Detected'} ${s.playerName}: ${s.playerPath}`
+      : s.playerError || 'VLC not found';
+    reset.hidden = !s.playerOverride;
   };
-  const updateVLC = guard(async (action: () => Promise<main.Settings>) => {
+  const updatePlayer = guard(async (action: () => Promise<main.Settings>) => {
     settings = await action();
-    renderVLC(settings);
+    renderPlayer(settings);
   });
-  reset.addEventListener('click', () => void updateVLC(ResetVLC));
-  renderVLC(settings);
+  reset.addEventListener('click', () => void updatePlayer(ResetPlayer));
+  renderPlayer(settings);
 
   const userAgent = h('input', {
     type: 'text',
@@ -423,13 +423,19 @@ const openSettings = async (): Promise<void> => {
       h(
         'fieldset',
         null,
-        h('legend', null, 'VLC'),
-        vlcStatus,
+        h('legend', null, 'Player'),
+        playerStatus,
         h(
           'div',
           { class: 'row' },
-          h('button', { type: 'button', class: 'small', onclick: () => void updateVLC(ChooseVLC) }, 'Choose VLC…'),
+          h('button', { type: 'button', class: 'small', onclick: () => void updatePlayer(ChoosePlayer) }, 'Choose player…'),
           reset,
+        ),
+        h(
+          'p',
+          { class: 'hint' },
+          'VLC is used if installed. You can also choose mpv, MPC-HC, PotPlayer or IINA; ' +
+            'MPC-HC and PotPlayer ignore the playlist’s User-Agent and Referrer.',
         ),
       ),
       h(

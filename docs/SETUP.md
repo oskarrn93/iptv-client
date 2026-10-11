@@ -15,7 +15,7 @@ same toolchain but have not yet been verified on a Mac (see
 | Wails CLI | v2.16.0 | **not installed globally** — pinned in `go.mod` and run with `go tool wails` |
 | WebView2 runtime | preinstalled on Windows 10/11 | renders the UI on Windows |
 | Xcode Command Line Tools | macOS only | C compiler for the macOS webview (CGO) |
-| VLC | 3.x | needed to actually play streams |
+| VLC | 3.x | needed to actually play streams (or mpv / IINA / MPC-HC / PotPlayer, chosen in Settings) |
 
 No C compiler is needed on Windows. SQLite is the pure-Go `modernc.org/sqlite`
 driver, so there is no CGO there either.
@@ -142,7 +142,7 @@ go run ./cmd/iptv-debug -db ./scratch.db add https://example.com/playlist.m3u "M
 go run ./cmd/iptv-debug -db ./scratch.db groups 1
 go run ./cmd/iptv-debug -db ./scratch.db search 1 bbc
 go run ./cmd/iptv-debug -db ./scratch.db play 42
-go run ./cmd/iptv-debug vlc        # which VLC would be used
+go run ./cmd/iptv-debug player     # which player would be used
 ```
 
 ## Where data lives
@@ -224,7 +224,7 @@ The app is not code-signed (no paid developer account).
 | Tests | ✅ | ⏳ (CI) |
 | App build + window opens | ✅ | ⏳ (CI on tags) |
 | VLC detection + playback | ✅ (registry lookup) | ⏳ |
-| UI tests (`npm run test:e2e`) | ✅ Edge, 31/31 | ⏳ (CI runs them in Chrome on Linux) |
+| UI tests (`npm run test:e2e`) | ✅ Edge, 33/33 | ⏳ (CI runs them in Chrome on Linux) |
 | App renders real data (50k channels) | ✅ | ⏳ |
 | `go tool wails dev` | ❌ blocked by Smart App Control | ⏳ |
 

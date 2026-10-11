@@ -12,7 +12,7 @@ export function ChannelIDs(arg1:main.ChannelQuery):Promise<Array<number>>;
 
 export function Channels(arg1:Array<number>):Promise<Array<main.Channel>>;
 
-export function ChooseVLC():Promise<main.Settings>;
+export function ChoosePlayer():Promise<main.Settings>;
 
 export function DeletePlaylist(arg1:number):Promise<void>;
 
@@ -22,13 +22,13 @@ export function ListGroups(arg1:number):Promise<Array<main.Group>>;
 
 export function ListPlaylists():Promise<Array<main.Playlist>>;
 
-export function Play(arg1:number):Promise<void>;
+export function Play(arg1:number):Promise<string>;
 
 export function RefreshPlaylist(arg1:number,arg2:boolean):Promise<main.ImportResult>;
 
 export function RenamePlaylist(arg1:number,arg2:string):Promise<void>;
 
-export function ResetVLC():Promise<main.Settings>;
+export function ResetPlayer():Promise<main.Settings>;
 
 export function SetFavorite(arg1:number,arg2:boolean):Promise<void>;
 

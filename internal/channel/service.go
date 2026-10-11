@@ -17,7 +17,7 @@ type Service struct {
 	Now       func() time.Time
 }
 
-// NewService returns a Service backed by db that reads the VLC location
+// NewService returns a Service backed by db that reads the player location
 // from settings.
 func NewService(db *database.DB, settings *setting.Service) *Service {
 	return &Service{
@@ -61,16 +61,21 @@ func (s *Service) SetFavorite(ctx context.Context, channelID int64, favorite boo
 	return s.favorites.Remove(ctx, playlistID, key)
 }
 
-// Play launches VLC for a channel.
-func (s *Service) Play(ctx context.Context, channelID int64) error {
+// Play launches the configured player for a channel and returns the
+// player's name.
+func (s *Service) Play(ctx context.Context, channelID int64) (string, error) {
 	ch, err := s.repo.Get(ctx, channelID)
 	if err != nil {
-		return err
+		return "", err
 	}
-	vlc, err := s.settings.VLCPath(ctx)
+	exe, err := s.settings.PlayerPath(ctx)
 	if err != nil {
-		return err
+		return "", err
+	}
+	p, err := player.ForExecutable(exe)
+	if err != nil {
+		return "", err
 	}
 	// Launch re-validates the URL and options; stored data is not trusted.
-	return player.Launch(vlc, ch.Name, ch.URL, ch.Options)
+	return p.Name(), player.Launch(exe, ch.Name, ch.URL, ch.Options)
 }

@@ -114,9 +114,10 @@ export namespace main {
 	}
 	
 	export class Settings {
-	    vlcPath: string;
-	    vlcOverride: boolean;
-	    vlcError: string;
+	    playerPath: string;
+	    playerName: string;
+	    playerOverride: boolean;
+	    playerError: string;
 	    userAgent: string;
 	    defaultAgent: string;
 	    dataDir: string;
@@ -128,9 +129,10 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.vlcPath = source["vlcPath"];
-	        this.vlcOverride = source["vlcOverride"];
-	        this.vlcError = source["vlcError"];
+	        this.playerPath = source["playerPath"];
+	        this.playerName = source["playerName"];
+	        this.playerOverride = source["playerOverride"];
+	        this.playerError = source["playerError"];
 	        this.userAgent = source["userAgent"];
 	        this.defaultAgent = source["defaultAgent"];
 	        this.dataDir = source["dataDir"];

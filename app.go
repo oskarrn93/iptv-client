@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	goruntime "runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"iptv-client/internal/channel"
 	"iptv-client/internal/database"
 	"iptv-client/internal/fetch"
+	"iptv-client/internal/player"
 	"iptv-client/internal/playlist"
 	"iptv-client/internal/setting"
 )
@@ -128,13 +130,14 @@ type ImportResult struct {
 
 // Settings is the settings dialog state.
 type Settings struct {
-	VLCPath      string `json:"vlcPath"`      // resolved path, "" if not found
-	VLCOverride  bool   `json:"vlcOverride"`  // true if chosen by the user
-	VLCError     string `json:"vlcError"`     // why VLC was not found
-	UserAgent    string `json:"userAgent"`    // "" = default
-	DefaultAgent string `json:"defaultAgent"` // shown as placeholder
-	DataDir      string `json:"dataDir"`
-	Version      string `json:"version"`
+	PlayerPath     string `json:"playerPath"`     // resolved path, "" if not found
+	PlayerName     string `json:"playerName"`     // e.g. "VLC"
+	PlayerOverride bool   `json:"playerOverride"` // true if chosen by the user
+	PlayerError    string `json:"playerError"`    // why no player was found
+	UserAgent      string `json:"userAgent"`      // "" = default
+	DefaultAgent   string `json:"defaultAgent"`   // shown as placeholder
+	DataDir        string `json:"dataDir"`
+	Version        string `json:"version"`
 }
 
 // ImportProgressEvent is emitted while importing with the running count.
@@ -312,11 +315,11 @@ func (a *App) SetFavorite(channelID int64, favorite bool) error {
 	return svc.channels.SetFavorite(a.ctx, channelID, favorite)
 }
 
-// Play opens a channel in VLC.
-func (a *App) Play(channelID int64) error {
+// Play opens a channel in the configured player and returns its name.
+func (a *App) Play(channelID int64) (string, error) {
 	svc, err := a.ready()
 	if err != nil {
-		return err
+		return "", err
 	}
 	return svc.channels.Play(a.ctx, channelID)
 }
@@ -334,11 +337,11 @@ func (a *App) GetSettings() (Settings, error) {
 		return Settings{}, err
 	}
 	s := Settings{
-		VLCPath: ls.VLCPath, VLCOverride: ls.VLCOverride, UserAgent: ls.UserAgent,
-		DefaultAgent: fetch.DefaultUserAgent, Version: version,
+		PlayerPath: ls.PlayerPath, PlayerName: ls.PlayerName, PlayerOverride: ls.PlayerOverride,
+		UserAgent: ls.UserAgent, DefaultAgent: fetch.DefaultUserAgent, Version: version,
 	}
-	if ls.VLCError != nil {
-		s.VLCError = ls.VLCError.Error()
+	if ls.PlayerError != nil {
+		s.PlayerError = ls.PlayerError.Error()
 	}
 	if p, err := database.ResolvePath(); err == nil {
 		s.DataDir = filepath.Dir(p)
@@ -346,35 +349,38 @@ func (a *App) GetSettings() (Settings, error) {
 	return s, nil
 }
 
-// ChooseVLC asks the user to locate the VLC executable and saves it.
-func (a *App) ChooseVLC() (Settings, error) {
+// ChoosePlayer asks the user to locate a supported player and saves it.
+func (a *App) ChoosePlayer() (Settings, error) {
 	svc, err := a.ready()
 	if err != nil {
 		return Settings{}, err
 	}
-	opts := runtime.OpenDialogOptions{Title: "Locate VLC"}
+	opts := runtime.OpenDialogOptions{Title: "Choose a player (VLC, mpv, MPC-HC, PotPlayer or IINA)"}
 	if goruntime.GOOS == "windows" {
-		opts.Filters = []runtime.FileFilter{{DisplayName: "VLC (vlc.exe)", Pattern: "vlc.exe"}}
+		opts.Filters = []runtime.FileFilter{{
+			DisplayName: "Supported players",
+			Pattern:     strings.Join(player.WindowsExecutables(), ";"),
+		}}
 	}
 	path, err := runtime.OpenFileDialog(a.ctx, opts)
 	if err != nil {
 		return Settings{}, err
 	}
 	if path != "" {
-		if err := svc.settings.SetVLCPath(a.ctx, path); err != nil {
+		if err := svc.settings.SetPlayerPath(a.ctx, path); err != nil {
 			return Settings{}, err
 		}
 	}
 	return a.GetSettings()
 }
 
-// ResetVLC returns to automatic VLC detection.
-func (a *App) ResetVLC() (Settings, error) {
+// ResetPlayer returns to automatic VLC detection.
+func (a *App) ResetPlayer() (Settings, error) {
 	svc, err := a.ready()
 	if err != nil {
 		return Settings{}, err
 	}
-	if err := svc.settings.SetVLCPath(a.ctx, ""); err != nil {
+	if err := svc.settings.SetPlayerPath(a.ctx, ""); err != nil {
 		return Settings{}, err
 	}
 	return a.GetSettings()
