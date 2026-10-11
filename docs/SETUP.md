@@ -15,7 +15,7 @@ same toolchain but have not yet been verified on a Mac (see
 | Wails CLI | v2.16.0 | **not installed globally** — pinned in `go.mod` and run with `go tool wails` |
 | WebView2 runtime | preinstalled on Windows 10/11 | renders the UI on Windows |
 | Xcode Command Line Tools | macOS only | C compiler for the macOS webview (CGO) |
-| VLC | 3.x | needed to actually play streams |
+| VLC | 3.x | needed to actually play streams (or mpv / IINA / MPC-HC / PotPlayer, chosen in Settings) |
 
 No C compiler is needed on Windows. SQLite is the pure-Go `modernc.org/sqlite`
 driver, so there is no CGO there either.
@@ -133,7 +133,7 @@ forbids evaluating strings, so the tests use their own `waitFor` helper instead.
 
 ### Debug CLI
 
-`cmd/iptv-debug` drives the same core library as the GUI. It is a dev tool
+`cmd/iptv-debug` drives the same services as the GUI. It is a dev tool
 only and is not shipped. Use `-db` to keep experiments out of your real
 database:
 
@@ -142,7 +142,7 @@ go run ./cmd/iptv-debug -db ./scratch.db add https://example.com/playlist.m3u "M
 go run ./cmd/iptv-debug -db ./scratch.db groups 1
 go run ./cmd/iptv-debug -db ./scratch.db search 1 bbc
 go run ./cmd/iptv-debug -db ./scratch.db play 42
-go run ./cmd/iptv-debug vlc        # which VLC would be used
+go run ./cmd/iptv-debug player     # which player would be used
 ```
 
 ## Where data lives
@@ -156,18 +156,20 @@ Playlist URLs (which often contain your provider username and password) are
 stored **unencrypted** in this file.
 
 Set `IPTV_CLIENT_DB` to a file path to use a different database, e.g. for
-testing with large playlists without touching your own data.
+testing with large playlists without touching your own data. The app and
+`iptv-debug` both honor it (`iptv-debug -db` still overrides it).
 
 ## CI and releases
 
-`.github/workflows/ci.yml`:
-
-- **Every push / PR:** format check, vet, race-enabled tests and 60 s of
-  fuzzing on Linux; frontend HTML-sink check and UI tests in Chrome; Windows
-  build (with a check that committed bindings are current) uploaded as an
-  artifact.
-- **Tags `v*` (or manual run):** additionally a macOS universal build,
-  ad-hoc signed, and a GitHub Release with both zips.
+- **`.github/workflows/ci.yml`, every PR and push to `main` (or manual
+  run):** format check,
+  vet, race-enabled tests and 60 s of fuzzing on Linux; frontend HTML-sink
+  check and UI tests in Chrome; Go tests on Windows and a check that the
+  committed bindings are current.
+- **`.github/workflows/build.yml`, tags `v*` (or manual run):** runs `ci.yml`
+  first, then builds Windows and macOS universal (ad-hoc signed) binaries,
+  uploads them as artifacts and, on tags, creates a GitHub Release with both
+  zips.
 
 `.github/dependabot.yml` opens weekly PRs for Go modules, frontend npm
 packages and GitHub Actions. Minor/patch bumps are grouped into one PR per
@@ -223,7 +225,7 @@ The app is not code-signed (no paid developer account).
 | Tests | ✅ | ⏳ (CI) |
 | App build + window opens | ✅ | ⏳ (CI on tags) |
 | VLC detection + playback | ✅ (registry lookup) | ⏳ |
-| UI tests (`npm run test:e2e`) | ✅ Edge, 31/31 | ⏳ (CI runs them in Chrome on Linux) |
+| UI tests (`npm run test:e2e`) | ✅ Edge, 33/33 | ⏳ (CI runs them in Chrome on Linux) |
 | App renders real data (50k channels) | ✅ | ⏳ |
 | `go tool wails dev` | ❌ blocked by Smart App Control | ⏳ |
 

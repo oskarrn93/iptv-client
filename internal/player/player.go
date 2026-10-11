@@ -1,9 +1,11 @@
-// Package player locates VLC and launches it for a stream.
+// Package player locates a media player (VLC by default) and launches it for
+// a stream.
 //
-// Everything that reaches the VLC command line originates from untrusted
-// playlists, so this package is the security boundary: stream URLs must use
-// an allowlisted scheme, and only a small allowlist of VLC options is passed
-// through. Arguments are never interpreted by a shell.
+// Everything that reaches the player's command line originates from
+// untrusted playlists, so this package is the security boundary: only known
+// players are started, stream URLs must use an allowlisted scheme, and only
+// a small allowlist of options is passed through. Arguments are never
+// interpreted by a shell.
 package player
 
 import (
@@ -13,7 +15,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -39,10 +40,10 @@ var allowedOptions = map[string]func(string) bool{
 
 const maxOptionLen = 512
 
-// ErrNotFound is returned when VLC cannot be located.
-var ErrNotFound = errors.New("VLC was not found; install it from https://www.videolan.org or set its location in Settings")
+// ErrNotFound is returned when no player is chosen and VLC cannot be located.
+var ErrNotFound = errors.New("VLC was not found; install it from https://www.videolan.org or choose a player in Settings")
 
-// ValidateURL reports whether s is safe to hand to VLC as a stream URL.
+// ValidateURL reports whether s is safe to hand to a player as a stream URL.
 func ValidateURL(s string) error {
 	if s == "" {
 		return errors.New("empty stream URL")
@@ -81,45 +82,37 @@ func SanitizeOptions(opts map[string]string) map[string]string {
 	return out
 }
 
-// Args builds the VLC argument list for a stream. It re-validates its
-// inputs, so callers cannot accidentally bypass the allowlists.
-func Args(title, streamURL string, opts map[string]string) ([]string, error) {
+// Args builds the argument list for playing a stream with the player at
+// exe. It re-validates its inputs, so callers cannot accidentally bypass the
+// allowlists.
+func Args(exe, title, streamURL string, opts map[string]string) ([]string, error) {
+	p, err := ForExecutable(exe)
+	if err != nil {
+		return nil, err
+	}
 	if err := ValidateURL(streamURL); err != nil {
 		return nil, err
 	}
-	args := []string{}
-	if t := cleanTitle(title); t != "" {
-		args = append(args, "--meta-title="+t)
-	}
-	safe := SanitizeOptions(opts)
-	keys := make([]string, 0, len(safe))
-	for k := range safe {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		args = append(args, "--"+k+"="+safe[k])
-	}
-	return append(args, streamURL), nil
+	return p.args(cleanTitle(title), streamURL, SanitizeOptions(opts)), nil
 }
 
-// Launch starts VLC detached from this process and returns once it has
-// started. The child is reaped in the background.
-func Launch(vlcPath, title, streamURL string, opts map[string]string) error {
-	args, err := Args(title, streamURL, opts)
+// Launch starts the player at exe detached from this process and returns
+// once it has started. The child is reaped in the background.
+func Launch(exe, title, streamURL string, opts map[string]string) error {
+	args, err := Args(exe, title, streamURL, opts)
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(vlcPath, args...)
+	cmd := exec.Command(exe, args...)
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("starting VLC: %w", err)
+		return fmt.Errorf("starting %s: %w", filepath.Base(exe), err)
 	}
 	go func() { _ = cmd.Wait() }()
 	return nil
 }
 
-// Find returns the VLC executable path. A non-empty override (from user
-// settings) is used if it is a VLC executable; otherwise well-known
+// Find returns the player executable path. A non-empty override (from user
+// settings) is used if it is a supported player; otherwise well-known VLC
 // locations for the current OS are searched.
 func Find(override string) (string, error) {
 	if override != "" {
@@ -128,29 +121,36 @@ func Find(override string) (string, error) {
 		}
 		return override, nil
 	}
-	for _, p := range candidates() {
-		if isFile(p) {
-			return p, nil
-		}
-	}
-	if p, err := exec.LookPath("vlc"); err == nil {
+	if p, ok := locate(locators()); ok {
 		return p, nil
 	}
 	return "", ErrNotFound
 }
 
-// ValidateExecutable checks that path is an existing file named like the VLC
-// executable. This stops a settings change from turning "play" into running
-// an arbitrary program.
+// ValidateExecutable checks that path is an existing file named like a
+// supported player's executable. This stops a settings change from turning
+// "play" into running an arbitrary program.
 func ValidateExecutable(path string) error {
-	base := strings.ToLower(filepath.Base(path))
-	if base != "vlc" && base != "vlc.exe" {
-		return fmt.Errorf("%q is not a VLC executable (expected vlc or vlc.exe)", path)
+	if _, err := ForExecutable(path); err != nil {
+		return err
 	}
 	if !isFile(path) {
 		return fmt.Errorf("%q does not exist", path)
 	}
 	return nil
+}
+
+// ResolveExecutable maps a path the user picked to the player executable (a
+// macOS app bundle to the supported binary inside it) and validates it.
+func ResolveExecutable(picked string) (string, error) {
+	if strings.HasSuffix(strings.ToLower(picked), ".app") {
+		exe, err := bundleExecutable(picked)
+		if err != nil {
+			return "", err
+		}
+		picked = exe
+	}
+	return picked, ValidateExecutable(picked)
 }
 
 func isFile(p string) bool {
@@ -162,18 +162,18 @@ func plainText(v string) bool {
 	return v != "" && !strings.HasPrefix(v, "-") && !hasControl(v)
 }
 
-func hasControl(s string) bool {
-	return strings.ContainsFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f })
-}
+func isControl(r rune) bool { return r < 0x20 || r == 0x7f }
+
+func hasControl(s string) bool { return strings.ContainsFunc(s, isControl) }
 
 func hasControlOrSpace(s string) bool {
-	return strings.ContainsFunc(s, func(r rune) bool { return r <= 0x20 || r == 0x7f })
+	return strings.ContainsFunc(s, func(r rune) bool { return r == ' ' || isControl(r) })
 }
 
 // cleanTitle removes control characters and bounds the length.
 func cleanTitle(s string) string {
 	s = strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
+		if isControl(r) {
 			return -1
 		}
 		return r

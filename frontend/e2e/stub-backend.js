@@ -84,6 +84,10 @@
     },
     async Play(id) {
       window.__calls.push(['Play', id]);
+      return 'VLC';
+    },
+    async CopyStreamURL(id) {
+      window.__calls.push(['CopyStreamURL', id]);
     },
     async RenamePlaylist(id, name) {
       playlist(id).name = name;
@@ -115,19 +119,20 @@
     async CancelImport() {},
     async GetSettings() {
       return {
-        vlcPath: 'C:\\Program Files\\VideoLAN\\VLC\\vlc.exe',
-        vlcOverride: false,
-        vlcError: '',
+        playerPath: 'C:\\Program Files\\VideoLAN\\VLC\\vlc.exe',
+        playerName: 'VLC',
+        playerOverride: false,
+        playerError: '',
         userAgent: window.__userAgent ?? '',
         defaultAgent: 'VLC/3.0.21 LibVLC/3.0.21',
         dataDir: 'C:\\Users\\test\\AppData\\Roaming\\IPTVClient',
         version: 'v0.0.0-test',
       };
     },
-    async ChooseVLC() {
+    async ChoosePlayer() {
       return api.GetSettings();
     },
-    async ResetVLC() {
+    async ResetPlayer() {
       return api.GetSettings();
     },
     async SetUserAgent(ua) {

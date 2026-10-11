@@ -123,8 +123,41 @@ try {
   await page.keyboard.press('Enter');
   await waitFor(() => document.querySelector('#status')?.textContent?.startsWith('Opened'));
   const played = await page.evaluate(() => window.__calls.filter(([m]) => m === 'Play').length);
-  check('keyboard: arrows select, F favorites, Enter plays', played === 1 && (await page.textContent('#status')).includes(selected), selected);
+  const status = await page.textContent('#status');
+  check('keyboard: arrows select, F favorites, Enter plays', played === 1 && status.includes(selected), selected);
+  check('status names the player', status.endsWith('in VLC'), status);
   check('arrow key moved past the first result', !selected.startsWith('Kanal 4999 '), selected);
+
+  // Copy the stream URL: Ctrl+C on the selection, or from the context menu.
+  const copies = () => page.evaluate(() => window.__calls.filter(([m]) => m === 'CopyStreamURL').map(([, id]) => id));
+  await page.keyboard.press('Control+c');
+  await waitFor(() => document.querySelector('#status')?.textContent?.startsWith('Copied'));
+  check('Ctrl+C copies the stream URL', (await copies()).length === 1 && (await page.textContent('#status')).includes(selected));
+
+  await page.click('.channel-row:nth-child(1) .channel-name', { button: 'right' });
+  await page.waitForSelector('.menu[role="menu"]');
+  await shot('03b-context-menu');
+  const items = await page.$$eval('.menu [role="menuitem"] span', (els) => els.map((e) => e.textContent));
+  check('context menu items', items.join('|') === 'Play|Copy stream URL|Add to favorites', items.join('|'));
+  check('context menu has keyboard focus', await page.evaluate(() => document.activeElement?.textContent?.startsWith('Play')));
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await waitFor(() => !document.querySelector('.menu'));
+  const copied = await copies();
+  check('context menu copies the right-clicked channel', copied.length === 2 && copied[1] !== copied[0], copied.join());
+  check('focus returns to the list', await page.evaluate(() => document.activeElement?.id === 'channels'));
+
+  await page.keyboard.press('Shift+F10');
+  await page.waitForSelector('.menu');
+  await page.keyboard.press('Escape');
+  await waitFor(() => !document.querySelector('.menu'));
+  check('Shift+F10 opens the menu, Escape closes it', (await copies()).length === 2);
+
+  await page.click('.channel-row:nth-child(1) .channel-name', { button: 'right' });
+  await page.waitForSelector('.menu');
+  await page.mouse.click(5, 5);
+  await waitFor(() => !document.querySelector('.menu'));
+  check('clicking elsewhere closes the menu', true);
 
   // Double-click plays too.
   await page.dblclick('.channel-row:nth-child(1) .channel-name');
@@ -159,8 +192,8 @@ try {
 
   // Settings.
   await page.click('#settings-button');
-  await page.waitForSelector('dialog[open] .vlc-status.ok');
-  check('settings shows VLC', (await page.textContent('dialog[open] .vlc-status')).includes('vlc.exe'));
+  await page.waitForSelector('dialog[open] .player-status.ok');
+  check('settings shows player', (await page.textContent('dialog[open] .player-status')).includes('Detected VLC: '));
   check('settings shows version', (await page.textContent('dialog[open]')).includes('IPTV Client v0.0.0-test'));
   await page.fill('dialog[open] input', 'MyPlayer/1.0');
   await shot('05-settings');

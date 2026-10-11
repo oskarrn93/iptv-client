@@ -80,26 +80,88 @@ func TestSanitizeOptions(t *testing.T) {
 }
 
 func TestArgs(t *testing.T) {
-	got, err := Args("BBC One\x07 HD", "http://example.com/1.ts", map[string]string{
+	const stream = "http://example.com/1.ts"
+	opts := map[string]string{
 		"http-user-agent": "UA",
 		"http-referrer":   "http://r/",
+		"network-caching": "1000",
 		"sout":            "#file{dst=x}",
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
-	want := []string{
-		"--meta-title=BBC One HD",
-		"--http-referrer=http://r/",
-		"--http-user-agent=UA",
-		"http://example.com/1.ts",
+	tests := []struct {
+		exe  string
+		want []string
+	}{
+		{filepath.Join("Program Files", "VideoLAN", "VLC", "vlc.exe"), []string{
+			"--meta-title=BBC One HD",
+			"--http-referrer=http://r/",
+			"--http-user-agent=UA",
+			"--network-caching=1000",
+			stream,
+		}},
+		{"/Applications/VLC.app/Contents/MacOS/VLC", []string{
+			"--meta-title=BBC One HD",
+			"--http-referrer=http://r/",
+			"--http-user-agent=UA",
+			"--network-caching=1000",
+			stream,
+		}},
+		{"/usr/bin/mpv", []string{
+			"--force-media-title=BBC One HD",
+			"--referrer=http://r/",
+			"--user-agent=UA",
+			"--",
+			stream,
+		}},
+		{"/Applications/IINA.app/Contents/MacOS/iina-cli", []string{
+			"--mpv-force-media-title=BBC One HD",
+			"--mpv-referrer=http://r/",
+			"--mpv-user-agent=UA",
+			stream,
+		}},
+		{filepath.Join("Program Files", "MPC-HC", "mpc-hc64.exe"), []string{stream}},
+		{filepath.Join("Program Files", "DAUM", "PotPlayer", "PotPlayerMini64.exe"), []string{stream}},
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Args = %q, want %q", got, want)
+	for _, tt := range tests {
+		got, err := Args(tt.exe, "BBC One\x07 HD", stream, opts)
+		if err != nil {
+			t.Errorf("Args(%q) error: %v", tt.exe, err)
+			continue
+		}
+		if !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("Args(%q) = %q, want %q", tt.exe, got, tt.want)
+		}
 	}
 
-	if _, err := Args("x", "--lua-intf=evil", nil); err == nil {
+	if _, err := Args("vlc", "x", "--lua-intf=evil", nil); err == nil {
 		t.Error("Args accepted an option as the stream URL")
+	}
+	if _, err := Args("cmd.exe", "x", stream, nil); err == nil {
+		t.Error("Args accepted an unsupported executable")
+	}
+}
+
+func TestResolveExecutable(t *testing.T) {
+	dir := t.TempDir()
+	bundle := func(name string, bins ...string) string {
+		app := filepath.Join(dir, name)
+		macos := filepath.Join(app, "Contents", "MacOS")
+		if err := os.MkdirAll(macos, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for _, b := range bins {
+			if err := os.WriteFile(filepath.Join(macos, b), nil, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return app
+	}
+
+	iinaApp := bundle("IINA.app", "IINA", "iina-cli")
+	if got, err := ResolveExecutable(iinaApp); err != nil || filepath.Base(got) != "iina-cli" {
+		t.Errorf("ResolveExecutable(IINA.app) = %q, %v; want iina-cli", got, err)
+	}
+	if _, err := ResolveExecutable(bundle("Terminal.app", "Terminal")); err == nil {
+		t.Error("ResolveExecutable accepted an unsupported app bundle")
 	}
 }
 
@@ -123,5 +185,25 @@ func TestValidateExecutable(t *testing.T) {
 	}
 	if _, err := Find(other); err == nil {
 		t.Error("Find accepted a non-VLC override")
+	}
+}
+
+func TestLocate(t *testing.T) {
+	dir := t.TempDir()
+	vlc := filepath.Join(dir, "VLC.app", "Contents", "MacOS", "VLC")
+	if err := os.MkdirAll(filepath.Dir(vlc), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(vlc, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(dir, "missing", "vlc")
+
+	got, ok := locate([]locator{fixedPaths{missing, dir}, appBundles{dir}})
+	if !ok || got != vlc {
+		t.Errorf("locate = %q, %v; want %q, true (skipping missing files and directories)", got, ok, vlc)
+	}
+	if _, ok := locate([]locator{fixedPaths{missing}}); ok {
+		t.Error("locate found a missing file")
 	}
 }

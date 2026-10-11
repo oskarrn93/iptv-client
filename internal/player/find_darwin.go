@@ -5,13 +5,10 @@ import (
 	"path/filepath"
 )
 
-// Launching the binary inside the bundle (rather than `open -a VLC`) is what
-// lets us pass arguments such as --meta-title. It starts a new VLC instance
-// per stream; `open` would reuse a running VLC but silently drop arguments.
-func candidates() []string {
-	out := []string{"/Applications/VLC.app/Contents/MacOS/VLC"}
+func platformLocators() []locator {
+	dirs := appBundles{"/Applications"}
 	if home, err := os.UserHomeDir(); err == nil {
-		out = append(out, filepath.Join(home, "Applications", "VLC.app", "Contents", "MacOS", "VLC"))
+		dirs = append(dirs, filepath.Join(home, "Applications"))
 	}
-	return out
+	return []locator{dirs}
 }

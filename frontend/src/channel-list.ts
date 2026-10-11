@@ -6,11 +6,14 @@ type Channel = main.Channel;
 
 const ROW_HEIGHT = 34;
 const OVERSCAN = 8;
-const CHUNK = 200; // rows fetched per request (server limit is 500)
+const CHUNK = 200; // rows fetched per request
 
 export interface ChannelListEvents {
   onPlay: (channel: Channel) => void;
   onToggleFavorite: (channel: Channel) => void;
+  onCopyURL: (channel: Channel) => void;
+  /** Right-click or the Menu key on a row; (x, y) is where to show a menu. */
+  onContextMenu: (channel: Channel, x: number, y: number) => void;
   onError: (error: unknown) => void;
 }
 
@@ -27,6 +30,7 @@ export class ChannelList {
   #selected = -1;
   #showGroup = true;
   #frame = 0;
+  #drawn = ''; // "first:last" currently rendered; '' forces a redraw
   readonly #spacer = h('div', { class: 'channel-spacer' });
 
   constructor(
@@ -54,6 +58,13 @@ export class ChannelList {
       const channel = this.#channelAt(this.#indexOf(e));
       if (channel) this.events.onPlay(channel);
     });
+    element.addEventListener('contextmenu', (e) => {
+      const channel = this.#channelAt(this.#indexOf(e));
+      if (!channel) return;
+      e.preventDefault();
+      this.element.focus();
+      this.events.onContextMenu(channel, e.clientX, e.clientY);
+    });
     new ResizeObserver(() => this.#schedule()).observe(element);
   }
 
@@ -72,12 +83,11 @@ export class ChannelList {
     this.#loading.clear();
     this.#generation++;
     this.#showGroup = showGroup;
-    this.#selected = ids.length ? Math.min(Math.max(this.#selected, 0), ids.length - 1) : -1;
-    if (!keepScroll) {
-      this.element.scrollTop = 0;
-      this.#selected = ids.length ? 0 : -1;
-    }
+    if (!keepScroll) this.element.scrollTop = 0;
+    const selected = keepScroll ? this.#selected : 0;
+    this.#selected = ids.length ? Math.min(Math.max(selected, 0), ids.length - 1) : -1;
     this.#spacer.style.height = `${ids.length * ROW_HEIGHT}px`;
+    this.#drawn = '';
     this.#render();
   }
 
@@ -85,12 +95,18 @@ export class ChannelList {
   update(channel: Channel): void {
     if (this.#cache.has(channel.id)) {
       this.#cache.set(channel.id, channel);
-      this.#schedule();
+      this.#redraw();
     }
   }
 
   focus(): void {
     this.element.focus();
+  }
+
+  /** Schedules a render that rebuilds the rows even if the range is unchanged. */
+  #redraw(): void {
+    this.#drawn = '';
+    this.#schedule();
   }
 
   #schedule(): void {
@@ -113,6 +129,9 @@ export class ChannelList {
 
   #render(): void {
     const [first, last] = this.#visibleRange();
+    const range = `${first}:${last}`;
+    if (range === this.#drawn) return; // scrolled by less than a row
+    this.#drawn = range;
     const rows: HTMLElement[] = [];
     for (let i = first; i <= last; i++) {
       const channel = this.#cache.get(this.#ids[i]);
@@ -156,7 +175,7 @@ export class ChannelList {
         {
           class: 'play',
           type: 'button',
-          title: 'Play in VLC (Enter)',
+          title: 'Play (Enter)',
           dataset: { action: 'play' },
         },
         '▶ Play',
@@ -173,7 +192,7 @@ export class ChannelList {
       const channels = await Channels(this.#ids.slice(chunk * CHUNK, (chunk + 1) * CHUNK));
       if (generation !== this.#generation) return;
       for (const channel of channels) this.#cache.set(channel.id, channel);
-      this.#schedule();
+      this.#redraw();
     } catch (error) {
       if (generation === this.#generation) this.events.onError(error);
     } finally {
@@ -199,7 +218,7 @@ export class ChannelList {
       if (top < scrollTop) this.element.scrollTop = top;
       else if (top + ROW_HEIGHT > scrollTop + clientHeight) this.element.scrollTop = top + ROW_HEIGHT - clientHeight;
     }
-    this.#schedule();
+    this.#redraw();
   }
 
   #onKey(e: KeyboardEvent): void {
@@ -225,6 +244,13 @@ export class ChannelList {
     } else if (e.key.toLowerCase() === 'f' && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
       this.events.onToggleFavorite(channel);
+    } else if (e.key.toLowerCase() === 'c' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      this.events.onCopyURL(channel);
+    } else if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+      e.preventDefault();
+      const row = this.#spacer.querySelector('.channel-row.selected')?.getBoundingClientRect();
+      if (row) this.events.onContextMenu(channel, row.left + 24, row.bottom);
     }
   }
 }

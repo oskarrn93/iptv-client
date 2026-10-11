@@ -406,6 +406,41 @@ button.play {
   border-left-color: var(--danger);
 }
 
+/* ---------- context menu ---------- */
+
+.menu {
+  position: fixed;
+  z-index: 20;
+  min-width: 200px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+.menu button {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+}
+.menu button:hover,
+.menu button:focus-visible {
+  background: var(--selected);
+  outline: none;
+}
+.menu kbd {
+  font: inherit;
+  color: var(--muted);
+}
+
 /* ---------- dialogs ---------- */
 
 dialog {
@@ -465,13 +500,13 @@ dialog legend {
   display: flex;
   gap: 8px;
 }
-.vlc-status {
+.player-status {
   word-break: break-all;
   user-select: text;
 }
-.vlc-status.ok {
+.player-status.ok {
   color: var(--ok);
 }
-.vlc-status.error {
+.player-status.error {
   color: var(--danger);
 }

@@ -3,7 +3,7 @@
 // with Go methods callable from JS, an XSS here would be serious (C3 in the
 // design review). CI rejects HTML-parsing DOM sinks in frontend/src.
 
-type Child = Node | string | number | false | null | undefined;
+export type Child = Node | string | number | false | null | undefined;
 type Listener = (event: Event) => void;
 type Props = Record<string, unknown>;
 
@@ -45,7 +45,12 @@ export const $ = <T extends HTMLElement = HTMLElement>(selector: string): T => {
   return el;
 };
 
-export const formatCount = (n: number): string => new Intl.NumberFormat().format(n);
+const number = new Intl.NumberFormat();
+
+export const formatCount = (n: number): string => number.format(n);
+
+/** "1 channel", "1,234 channels". */
+export const plural = (n: number, word: string): string => `${formatCount(n)} ${word}${n === 1 ? '' : 's'}`;
 
 const relative = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
 
