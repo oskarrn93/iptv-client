@@ -145,6 +145,24 @@ go run ./cmd/iptv-debug -db ./scratch.db play 42
 go run ./cmd/iptv-debug player     # which player would be used
 ```
 
+### Claude Code
+
+`CLAUDE.md` and `.claude/` configure [Claude Code](https://claude.com/claude-code)
+for this repo. The hooks need `node` on PATH (restart the editor after
+installing Node).
+
+- **Hooks** (`.claude/settings.json`, scripts in `.claude/hooks/`): run
+  `gofmt -w` on each edited `.go` file, and block edits that add HTML sinks
+  to `frontend/src` or touch generated files (`frontend/wailsjs`,
+  `wails_tools.nsh`). These mirror CI checks.
+- **Skills**: `change-app-api` (checklist when the bound `App` API changes:
+  bindings, e2e stub, invariants) and `/new-migration <name>` (scaffolds the
+  next migration pair).
+- **Agent**: `invariant-reviewer` checks a diff against the security
+  invariants in the README.
+- **MCP**: `.mcp.json` adds context7 for library docs (Wails, golang-migrate,
+  Vite, ...). Claude Code asks once before enabling it.
+
 ## Where data lives
 
 | OS | Database |
