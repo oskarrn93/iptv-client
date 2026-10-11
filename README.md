@@ -39,12 +39,13 @@ Playlist URLs are stored unencrypted in the local database.
 main.go, app.go        Wails entry point and GUI bindings
 frontend/              UI (Vite + TypeScript, no framework)
 frontend/e2e           UI tests against a stubbed backend
+internal/playlist      playlists: add, import/refresh, rename, delete (service + repository)
+internal/channel       channels: browse, search, favorites, play (service + repositories)
+internal/setting       settings: VLC location, User-Agent (service + repository)
+internal/database      SQLite connection, migrations, transactions
 internal/m3u           streaming playlist parser
-internal/model         entities shared by repository and service
-internal/repository    SQLite repositories (one per table), migrations, transactions
 internal/fetch         playlist download (size cap, ETag, credential-safe errors)
 internal/player        VLC discovery, URL/option allowlists, launch
-internal/service       business logic used by GUI and CLI (import, refresh, play)
 cmd/iptv-debug         developer CLI (not shipped)
 docs/SETUP.md          developer setup — start here
 ```

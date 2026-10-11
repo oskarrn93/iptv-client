@@ -1,4 +1,4 @@
-package repository
+package channel
 
 import (
 	"context"
@@ -8,17 +8,21 @@ import (
 	"fmt"
 	"strings"
 
-	"iptv-client/internal/model"
+	"iptv-client/internal/database"
 )
 
-// ChannelRepository reads and writes the channels table and its full-text
+// Repository reads and writes the channels table and its full-text
 // index channels_fts.
-type ChannelRepository struct {
-	q Querier
+type Repository struct {
+	q database.Querier
 }
 
+// NewRepository returns a Repository that runs its statements on q. Pass a
+// transaction when replacing a playlist's channels.
+func NewRepository(q database.Querier) *Repository { return &Repository{q: q} }
+
 // ListGroups returns the groups of a playlist in playlist order, with counts.
-func (r *ChannelRepository) ListGroups(ctx context.Context, playlistID int64) ([]model.Group, error) {
+func (r *Repository) ListGroups(ctx context.Context, playlistID int64) ([]Group, error) {
 	rows, err := r.q.QueryContext(ctx, `
 		SELECT group_title, COUNT(*)
 		FROM channels
@@ -29,9 +33,9 @@ func (r *ChannelRepository) ListGroups(ctx context.Context, playlistID int64) ([
 		return nil, err
 	}
 	defer rows.Close()
-	var out []model.Group
+	var out []Group
 	for rows.Next() {
-		var g model.Group
+		var g Group
 		if err := rows.Scan(&g.Name, &g.Count); err != nil {
 			return nil, err
 		}
@@ -45,7 +49,7 @@ func (r *ChannelRepository) ListGroups(ctx context.Context, playlistID int64) ([
 // gives cheap random access for a virtualized list (no OFFSET scans).
 //
 // Each combination of filters has its own complete statement.
-func (r *ChannelRepository) ListIDs(ctx context.Context, f model.ChannelFilter) ([]int64, error) {
+func (r *Repository) ListIDs(ctx context.Context, f Filter) ([]int64, error) {
 	search := ftsQuery(f.Query)
 	var (
 		rows *sql.Rows
@@ -150,9 +154,9 @@ func (r *ChannelRepository) ListIDs(ctx context.Context, f model.ChannelFilter) 
 // ListByIDs returns the list fields of the channels with the given IDs, in
 // the order given. Unknown IDs are skipped. The IDs are bound as one JSON
 // array, so there is no limit on how many can be requested.
-func (r *ChannelRepository) ListByIDs(ctx context.Context, ids []int64) ([]model.Channel, error) {
+func (r *Repository) ListByIDs(ctx context.Context, ids []int64) ([]Channel, error) {
 	if len(ids) == 0 {
-		return []model.Channel{}, nil
+		return []Channel{}, nil
 	}
 	idList, err := json.Marshal(ids)
 	if err != nil {
@@ -170,9 +174,9 @@ func (r *ChannelRepository) ListByIDs(ctx context.Context, ids []int64) ([]model
 		return nil, err
 	}
 	defer rows.Close()
-	byID := make(map[int64]model.Channel, len(ids))
+	byID := make(map[int64]Channel, len(ids))
 	for rows.Next() {
-		var c model.Channel
+		var c Channel
 		if err := rows.Scan(&c.ID, &c.Name, &c.Group, &c.Favorite); err != nil {
 			return nil, err
 		}
@@ -181,7 +185,7 @@ func (r *ChannelRepository) ListByIDs(ctx context.Context, ids []int64) ([]model
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	out := make([]model.Channel, 0, len(ids))
+	out := make([]Channel, 0, len(ids))
 	for _, id := range ids {
 		if c, ok := byID[id]; ok {
 			out = append(out, c)
@@ -191,8 +195,8 @@ func (r *ChannelRepository) ListByIDs(ctx context.Context, ids []int64) ([]model
 }
 
 // Get returns one channel with all its fields.
-func (r *ChannelRepository) Get(ctx context.Context, id int64) (model.Channel, error) {
-	c := model.Channel{ID: id}
+func (r *Repository) Get(ctx context.Context, id int64) (Channel, error) {
+	c := Channel{ID: id}
 	var opts string
 	err := r.q.QueryRowContext(ctx, `
 		SELECT
@@ -205,26 +209,26 @@ func (r *ChannelRepository) Get(ctx context.Context, id int64) (model.Channel, e
 		FROM channels c
 		WHERE c.id = ?`, id).Scan(&c.Name, &c.URL, &c.Group, &c.TvgID, &opts, &c.Favorite)
 	if errors.Is(err, sql.ErrNoRows) {
-		return model.Channel{}, fmt.Errorf("channel %d: %w", id, ErrNotFound)
+		return Channel{}, fmt.Errorf("channel %d: %w", id, database.ErrNotFound)
 	}
 	if err != nil {
-		return model.Channel{}, err
+		return Channel{}, err
 	}
 	if err := json.Unmarshal([]byte(opts), &c.Options); err != nil {
-		return model.Channel{}, fmt.Errorf("channel %d options: %w", id, err)
+		return Channel{}, fmt.Errorf("channel %d options: %w", id, err)
 	}
 	return c, nil
 }
 
 // FavoriteKey returns the playlist and favorite key of a channel, which is
-// what FavoriteRepository stores.
-func (r *ChannelRepository) FavoriteKey(ctx context.Context, id int64) (playlistID int64, key string, err error) {
+// what favoriteRepository stores.
+func (r *Repository) FavoriteKey(ctx context.Context, id int64) (playlistID int64, key string, err error) {
 	err = r.q.QueryRowContext(ctx, `
 		SELECT playlist_id, fav_key
 		FROM channels
 		WHERE id = ?`, id).Scan(&playlistID, &key)
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, "", fmt.Errorf("channel %d: %w", id, ErrNotFound)
+		return 0, "", fmt.Errorf("channel %d: %w", id, database.ErrNotFound)
 	}
 	return playlistID, key, err
 }
@@ -235,7 +239,7 @@ func (r *ChannelRepository) FavoriteKey(ctx context.Context, id int64) (playlist
 // The index is cleared in one statement (a per-row delete trigger costs as
 // much as the insert trigger did), and before the rows are deleted, because
 // an external-content FTS5 delete needs the indexed values.
-func (r *ChannelRepository) DeleteAllInPlaylist(ctx context.Context, playlistID int64) error {
+func (r *Repository) DeleteAllInPlaylist(ctx context.Context, playlistID int64) error {
 	if _, err := r.q.ExecContext(ctx, `
 		INSERT INTO channels_fts (channels_fts, rowid, name, group_title)
 		SELECT 'delete', id, name, group_title
@@ -252,7 +256,7 @@ func (r *ChannelRepository) DeleteAllInPlaylist(ctx context.Context, playlistID 
 // IndexAllInPlaylist adds a playlist's channels to the search index. Call it
 // once after inserting them all: one bulk insert is much faster than
 // indexing row by row.
-func (r *ChannelRepository) IndexAllInPlaylist(ctx context.Context, playlistID int64) error {
+func (r *Repository) IndexAllInPlaylist(ctx context.Context, playlistID int64) error {
 	_, err := r.q.ExecContext(ctx, `
 		INSERT INTO channels_fts (rowid, name, group_title)
 		SELECT id, name, group_title
@@ -264,10 +268,10 @@ func (r *ChannelRepository) IndexAllInPlaylist(ctx context.Context, playlistID i
 // insertBatch is the number of channels written per INSERT.
 const insertBatch = 1000
 
-// ChannelInserter appends channels to one playlist, in the order given.
+// Inserter appends channels to one playlist, in the order given.
 // Rows are buffered and written insertBatch at a time; call Flush after the
 // last Insert and Close when done.
-type ChannelInserter struct {
+type Inserter struct {
 	stmt       *sql.Stmt
 	playlistID int64
 	buf        []channelRow
@@ -287,13 +291,13 @@ type channelRow struct {
 	FavKey   string `json:"fav_key"`
 }
 
-// NewInserter prepares a ChannelInserter for a playlist. New rows are not
+// NewInserter prepares an Inserter for a playlist. New rows are not
 // searchable until IndexAllInPlaylist runs.
 //
 // A batch is bound as a single JSON array and expanded with json_each, so
 // one fixed statement inserts any number of rows; a multi-row VALUES list
 // would need SQL built to the batch size.
-func (r *ChannelRepository) NewInserter(ctx context.Context, playlistID int64) (*ChannelInserter, error) {
+func (r *Repository) NewInserter(ctx context.Context, playlistID int64) (*Inserter, error) {
 	stmt, err := r.q.PrepareContext(ctx, `
 		INSERT INTO channels
 			(playlist_id, position, name, url, group_title, tvg_id, tvg_name, tvg_logo, vlc_opts, fav_key)
@@ -312,11 +316,11 @@ func (r *ChannelRepository) NewInserter(ctx context.Context, playlistID int64) (
 	if err != nil {
 		return nil, err
 	}
-	return &ChannelInserter{stmt: stmt, playlistID: playlistID, buf: make([]channelRow, 0, insertBatch)}, nil
+	return &Inserter{stmt: stmt, playlistID: playlistID, buf: make([]channelRow, 0, insertBatch)}, nil
 }
 
 // Insert buffers one channel, writing the buffer when it is full.
-func (i *ChannelInserter) Insert(ctx context.Context, c model.ChannelInput) error {
+func (i *Inserter) Insert(ctx context.Context, c Input) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -347,7 +351,7 @@ func (i *ChannelInserter) Insert(ctx context.Context, c model.ChannelInput) erro
 }
 
 // Flush writes any buffered channels.
-func (i *ChannelInserter) Flush(ctx context.Context) error {
+func (i *Inserter) Flush(ctx context.Context) error {
 	if len(i.buf) == 0 {
 		return nil
 	}
@@ -361,10 +365,10 @@ func (i *ChannelInserter) Flush(ctx context.Context) error {
 }
 
 // Count is the number of channels inserted so far, including buffered ones.
-func (i *ChannelInserter) Count() int { return i.count }
+func (i *Inserter) Count() int { return i.count }
 
 // Close releases the prepared statement. Buffered rows are discarded.
-func (i *ChannelInserter) Close() error { return i.stmt.Close() }
+func (i *Inserter) Close() error { return i.stmt.Close() }
 
 // favKey identifies a channel for favorites. It deliberately excludes the
 // URL (which often embeds account credentials that change) and the group

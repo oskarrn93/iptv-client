@@ -11,10 +11,11 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"iptv-client/internal/channel"
+	"iptv-client/internal/database"
 	"iptv-client/internal/fetch"
-	"iptv-client/internal/model"
-	"iptv-client/internal/repository"
-	"iptv-client/internal/service"
+	"iptv-client/internal/playlist"
+	"iptv-client/internal/setting"
 )
 
 // App is bound to the frontend. Every exported method is callable from
@@ -23,12 +24,28 @@ import (
 // from the UI (C3 in the design review).
 type App struct {
 	ctx     context.Context
-	db      *repository.Database
-	svc     *service.Services
+	db      *database.DB
+	svc     *services
 	initErr error
 
 	importMu     sync.Mutex
 	cancelImport context.CancelFunc // non-nil while an import runs
+}
+
+// services are the domain services the bound methods call.
+type services struct {
+	playlists *playlist.Service
+	channels  *channel.Service
+	settings  *setting.Service
+}
+
+func newServices(db *database.DB) *services {
+	settings := setting.NewService(db)
+	return &services{
+		playlists: playlist.NewService(db, settings),
+		channels:  channel.NewService(db, settings),
+		settings:  settings,
+	}
 }
 
 // NewApp creates the application.
@@ -36,12 +53,12 @@ func NewApp() *App { return &App{} }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	path, err := repository.ResolvePath()
+	path, err := database.ResolvePath()
 	if err == nil {
-		var db *repository.Database
-		if db, err = repository.Open(ctx, path); err == nil {
+		var db *database.DB
+		if db, err = database.Open(ctx, path); err == nil {
 			a.db = db
-			a.svc = service.New(db)
+			a.svc = newServices(db)
 			return
 		}
 	}
@@ -55,7 +72,7 @@ func (a *App) shutdown(context.Context) {
 }
 
 // ready returns the services or the startup error.
-func (a *App) ready() (*service.Services, error) {
+func (a *App) ready() (*services, error) {
 	if a.initErr != nil {
 		return nil, a.initErr
 	}
@@ -131,7 +148,7 @@ func (a *App) ListPlaylists() ([]Playlist, error) {
 	if err != nil {
 		return nil, err
 	}
-	ps, err := svc.Playlists.List(a.ctx)
+	ps, err := svc.playlists.List(a.ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +190,7 @@ func (a *App) add(name, source string) (ImportResult, error) {
 		return ImportResult{}, err
 	}
 	defer done()
-	p, res, err := svc.Playlists.Add(ctx, name, source, a.progress)
+	p, res, err := svc.playlists.Add(ctx, name, source, a.progress)
 	if err != nil {
 		return ImportResult{}, importError(err)
 	}
@@ -193,15 +210,15 @@ func (a *App) RefreshPlaylist(id int64, force bool) (ImportResult, error) {
 		return ImportResult{}, err
 	}
 	defer done()
-	res, err := svc.Playlists.Refresh(ctx, id, force, a.progress)
-	var tooSoon *service.TooSoonError
+	res, err := svc.playlists.Refresh(ctx, id, force, a.progress)
+	var tooSoon *playlist.TooSoonError
 	if errors.As(err, &tooSoon) {
 		return ImportResult{TooSoonMinutes: tooSoon.Minutes()}, nil
 	}
 	if err != nil {
 		return ImportResult{Skipped: res.Skipped}, importError(err)
 	}
-	p, err := svc.Playlists.Get(a.ctx, id)
+	p, err := svc.playlists.Get(a.ctx, id)
 	if err != nil {
 		return ImportResult{}, err
 	}
@@ -224,7 +241,7 @@ func (a *App) RenamePlaylist(id int64, name string) error {
 	if err != nil {
 		return err
 	}
-	return svc.Playlists.Rename(a.ctx, id, name)
+	return svc.playlists.Rename(a.ctx, id, name)
 }
 
 // DeletePlaylist removes a playlist and its favorites.
@@ -233,7 +250,7 @@ func (a *App) DeletePlaylist(id int64) error {
 	if err != nil {
 		return err
 	}
-	return svc.Playlists.Delete(a.ctx, id)
+	return svc.playlists.Delete(a.ctx, id)
 }
 
 // --- channels ---
@@ -244,7 +261,7 @@ func (a *App) ListGroups(playlistID int64) ([]Group, error) {
 	if err != nil {
 		return nil, err
 	}
-	gs, err := svc.Channels.Groups(a.ctx, playlistID)
+	gs, err := svc.channels.Groups(a.ctx, playlistID)
 	if err != nil {
 		return nil, err
 	}
@@ -262,11 +279,11 @@ func (a *App) ChannelIDs(q ChannelQuery) ([]int64, error) {
 	if err != nil {
 		return nil, err
 	}
-	f := model.ChannelFilter{PlaylistID: q.PlaylistID, FavoritesOnly: q.FavoritesOnly, Query: q.Search}
+	f := channel.Filter{PlaylistID: q.PlaylistID, FavoritesOnly: q.FavoritesOnly, Query: q.Search}
 	if !q.AllGroups {
 		f.Group = &q.Group
 	}
-	return svc.Channels.IDs(a.ctx, f)
+	return svc.channels.IDs(a.ctx, f)
 }
 
 // Channels returns the rows for ids, in the order given.
@@ -275,7 +292,7 @@ func (a *App) Channels(ids []int64) ([]Channel, error) {
 	if err != nil {
 		return nil, err
 	}
-	cs, err := svc.Channels.ByIDs(a.ctx, ids)
+	cs, err := svc.channels.ByIDs(a.ctx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -292,7 +309,7 @@ func (a *App) SetFavorite(channelID int64, favorite bool) error {
 	if err != nil {
 		return err
 	}
-	return svc.Channels.SetFavorite(a.ctx, channelID, favorite)
+	return svc.channels.SetFavorite(a.ctx, channelID, favorite)
 }
 
 // Play opens a channel in VLC.
@@ -301,7 +318,7 @@ func (a *App) Play(channelID int64) error {
 	if err != nil {
 		return err
 	}
-	return svc.Channels.Play(a.ctx, channelID)
+	return svc.channels.Play(a.ctx, channelID)
 }
 
 // --- settings ---
@@ -312,7 +329,7 @@ func (a *App) GetSettings() (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
-	ls, err := svc.Settings.Get(a.ctx)
+	ls, err := svc.settings.Get(a.ctx)
 	if err != nil {
 		return Settings{}, err
 	}
@@ -323,7 +340,7 @@ func (a *App) GetSettings() (Settings, error) {
 	if ls.VLCError != nil {
 		s.VLCError = ls.VLCError.Error()
 	}
-	if p, err := repository.ResolvePath(); err == nil {
+	if p, err := database.ResolvePath(); err == nil {
 		s.DataDir = filepath.Dir(p)
 	}
 	return s, nil
@@ -344,7 +361,7 @@ func (a *App) ChooseVLC() (Settings, error) {
 		return Settings{}, err
 	}
 	if path != "" {
-		if err := svc.Settings.SetVLCPath(a.ctx, path); err != nil {
+		if err := svc.settings.SetVLCPath(a.ctx, path); err != nil {
 			return Settings{}, err
 		}
 	}
@@ -357,7 +374,7 @@ func (a *App) ResetVLC() (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
-	if err := svc.Settings.SetVLCPath(a.ctx, ""); err != nil {
+	if err := svc.settings.SetVLCPath(a.ctx, ""); err != nil {
 		return Settings{}, err
 	}
 	return a.GetSettings()
@@ -369,7 +386,7 @@ func (a *App) SetUserAgent(ua string) error {
 	if err != nil {
 		return err
 	}
-	return svc.Settings.SetUserAgent(a.ctx, ua)
+	return svc.settings.SetUserAgent(a.ctx, ua)
 }
 
 // --- helpers ---
@@ -393,9 +410,9 @@ func (a *App) beginImport() (context.Context, func(), error) {
 
 func (a *App) progress(n int) { runtime.EventsEmit(a.ctx, ImportProgressEvent, n) }
 
-func toPlaylist(p model.Playlist) Playlist {
+func toPlaylist(p playlist.Playlist) Playlist {
 	src := p.Source
-	if p.SourceType == model.SourceURL {
+	if p.SourceType == playlist.SourceURL {
 		src = fetch.Redact(src)
 	}
 	var refreshed int64

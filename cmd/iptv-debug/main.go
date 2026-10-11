@@ -12,9 +12,10 @@ import (
 	"strconv"
 	"text/tabwriter"
 
-	"iptv-client/internal/model"
-	"iptv-client/internal/repository"
-	"iptv-client/internal/service"
+	"iptv-client/internal/channel"
+	"iptv-client/internal/database"
+	"iptv-client/internal/playlist"
+	"iptv-client/internal/setting"
 )
 
 const usage = `usage: iptv-debug [-db path] <command> [args]
@@ -34,7 +35,7 @@ commands:
 `
 
 func main() {
-	defaultDB, _ := repository.ResolvePath()
+	defaultDB, _ := database.ResolvePath()
 	dbPath := flag.String("db", defaultDB, "database file")
 	flag.Usage = func() { fmt.Fprint(os.Stderr, usage); flag.PrintDefaults() }
 	flag.Parse()
@@ -45,14 +46,30 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	db, err := repository.Open(ctx, *dbPath)
+	db, err := database.Open(ctx, *dbPath)
 	if err != nil {
 		fail(err)
 	}
 	defer db.Close()
-	if err := run(ctx, service.New(db), flag.Args()); err != nil {
+	if err := run(ctx, newServices(db), flag.Args()); err != nil {
 		db.Close()
 		fail(err)
+	}
+}
+
+// services are the domain services the commands call.
+type services struct {
+	playlists *playlist.Service
+	channels  *channel.Service
+	settings  *setting.Service
+}
+
+func newServices(db *database.DB) *services {
+	settings := setting.NewService(db)
+	return &services{
+		playlists: playlist.NewService(db, settings),
+		channels:  channel.NewService(db, settings),
+		settings:  settings,
 	}
 }
 
@@ -61,7 +78,7 @@ func fail(err error) {
 	os.Exit(1)
 }
 
-func run(ctx context.Context, svc *service.Services, args []string) error {
+func run(ctx context.Context, svc *services, args []string) error {
 	cmd, args := args[0], args[1:]
 	need := func(n int) error {
 		if len(args) < n {
@@ -89,7 +106,7 @@ func run(ctx context.Context, svc *service.Services, args []string) error {
 		if len(args) > 1 {
 			name = args[1]
 		}
-		p, res, err := svc.Playlists.Add(ctx, name, args[0], progress)
+		p, res, err := svc.playlists.Add(ctx, name, args[0], progress)
 		fmt.Fprintln(os.Stderr)
 		if err != nil {
 			return err
@@ -97,7 +114,7 @@ func run(ctx context.Context, svc *service.Services, args []string) error {
 		fmt.Printf("added playlist %d %q: %d channels, %d skipped (unplayable URLs)\n", p.ID, p.Name, res.Imported, res.Skipped)
 
 	case "list":
-		ps, err := svc.Playlists.List(ctx)
+		ps, err := svc.playlists.List(ctx)
 		if err != nil {
 			return err
 		}
@@ -111,7 +128,7 @@ func run(ctx context.Context, svc *service.Services, args []string) error {
 			return err
 		}
 		force := len(args) > 1 && args[1] == "-force"
-		res, err := svc.Playlists.Refresh(ctx, id(0), force, progress)
+		res, err := svc.playlists.Refresh(ctx, id(0), force, progress)
 		fmt.Fprintln(os.Stderr)
 		if err != nil {
 			return err
@@ -126,13 +143,13 @@ func run(ctx context.Context, svc *service.Services, args []string) error {
 		if err := need(1); err != nil {
 			return err
 		}
-		return svc.Playlists.Delete(ctx, id(0))
+		return svc.playlists.Delete(ctx, id(0))
 
 	case "groups":
 		if err := need(1); err != nil {
 			return err
 		}
-		gs, err := svc.Channels.Groups(ctx, id(0))
+		gs, err := svc.channels.Groups(ctx, id(0))
 		if err != nil {
 			return err
 		}
@@ -148,7 +165,7 @@ func run(ctx context.Context, svc *service.Services, args []string) error {
 		if err := need(1); err != nil {
 			return err
 		}
-		f := model.ChannelFilter{PlaylistID: id(0), FavoritesOnly: cmd == "favs"}
+		f := channel.Filter{PlaylistID: id(0), FavoritesOnly: cmd == "favs"}
 		if len(args) > 1 {
 			if cmd == "search" {
 				f.Query = args[1]
@@ -162,16 +179,16 @@ func run(ctx context.Context, svc *service.Services, args []string) error {
 		if err := need(2); err != nil {
 			return err
 		}
-		return svc.Channels.SetFavorite(ctx, id(0), args[1] == "on")
+		return svc.channels.SetFavorite(ctx, id(0), args[1] == "on")
 
 	case "play":
 		if err := need(1); err != nil {
 			return err
 		}
-		return svc.Channels.Play(ctx, id(0))
+		return svc.channels.Play(ctx, id(0))
 
 	case "vlc":
-		p, err := svc.Settings.VLCPath(ctx)
+		p, err := svc.settings.VLCPath(ctx)
 		if err != nil {
 			return err
 		}
@@ -183,12 +200,12 @@ func run(ctx context.Context, svc *service.Services, args []string) error {
 	return nil
 }
 
-func printChannels(ctx context.Context, svc *service.Services, f model.ChannelFilter, w *tabwriter.Writer) error {
-	ids, err := svc.Channels.IDs(ctx, f)
+func printChannels(ctx context.Context, svc *services, f channel.Filter, w *tabwriter.Writer) error {
+	ids, err := svc.channels.IDs(ctx, f)
 	if err != nil {
 		return err
 	}
-	cs, err := svc.Channels.ByIDs(ctx, ids)
+	cs, err := svc.channels.ByIDs(ctx, ids)
 	if err != nil {
 		return err
 	}

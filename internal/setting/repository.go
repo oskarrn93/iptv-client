@@ -1,18 +1,23 @@
-package repository
+package setting
 
 import (
 	"context"
 	"database/sql"
 	"errors"
+
+	"iptv-client/internal/database"
 )
 
-// SettingRepository reads and writes the settings key/value table.
-type SettingRepository struct {
-	q Querier
+// Repository reads and writes the settings key/value table.
+type Repository struct {
+	q database.Querier
 }
 
+// NewRepository returns a Repository that runs its statements on q.
+func NewRepository(q database.Querier) *Repository { return &Repository{q: q} }
+
 // Get returns a setting value, or "" if unset.
-func (r *SettingRepository) Get(ctx context.Context, key string) (string, error) {
+func (r *Repository) Get(ctx context.Context, key string) (string, error) {
 	var v string
 	err := r.q.QueryRowContext(ctx, `
 		SELECT value
@@ -25,7 +30,7 @@ func (r *SettingRepository) Get(ctx context.Context, key string) (string, error)
 }
 
 // Set stores a setting, replacing any previous value.
-func (r *SettingRepository) Set(ctx context.Context, key, value string) error {
+func (r *Repository) Set(ctx context.Context, key, value string) error {
 	_, err := r.q.ExecContext(ctx, `
 		INSERT INTO settings (key, value)
 		VALUES (?, ?)
@@ -34,7 +39,7 @@ func (r *SettingRepository) Set(ctx context.Context, key, value string) error {
 }
 
 // Delete removes a setting. Deleting a missing setting is a no-op.
-func (r *SettingRepository) Delete(ctx context.Context, key string) error {
+func (r *Repository) Delete(ctx context.Context, key string) error {
 	_, err := r.q.ExecContext(ctx, `
 		DELETE FROM settings
 		WHERE key = ?`, key)

@@ -1,12 +1,13 @@
-// Package repository persists playlists, channels, favorites and settings in
-// a local SQLite database. There is one repository per table; each runs its
-// statements either directly on the database or inside a transaction
-// started with Database.InTx.
+// Package database owns the local SQLite database: opening it, applying the
+// schema migrations and running transactions. The repositories that read
+// and write its tables live in the domain packages (playlist, channel,
+// setting); each runs its statements on a Querier, which is either the DB
+// itself or a transaction started with DB.InTx.
 //
 // Every SQL statement is written out in full as a string literal. Queries
 // are never assembled by concatenation, even when that means repeating
 // near-identical statements.
-package repository
+package database
 
 import (
 	"context"
@@ -31,7 +32,7 @@ const AppDirName = "IPTVClient"
 // ErrNotFound is returned when a requested row does not exist.
 var ErrNotFound = errors.New("not found")
 
-// Querier is what the repositories need to run statements. Both *sql.DB and
+// Querier is what the repositories need to run statements. Both *DB and
 // *sql.Tx implement it.
 type Querier interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
@@ -40,28 +41,10 @@ type Querier interface {
 	PrepareContext(ctx context.Context, query string) (*sql.Stmt, error)
 }
 
-// Repositories groups the repositories that share one Querier.
-type Repositories struct {
-	Playlists *PlaylistRepository
-	Channels  *ChannelRepository
-	Favorites *FavoriteRepository
-	Settings  *SettingRepository
-}
-
-func newRepositories(q Querier) Repositories {
-	return Repositories{
-		Playlists: &PlaylistRepository{q: q},
-		Channels:  &ChannelRepository{q: q},
-		Favorites: &FavoriteRepository{q: q},
-		Settings:  &SettingRepository{q: q},
-	}
-}
-
-// Database owns the SQLite connection. Its embedded repositories run each
-// statement on its own; use InTx to group statements atomically.
-type Database struct {
-	Repositories
-	conn *sql.DB
+// DB is the SQLite connection. Each statement run on it directly is its own
+// transaction; use InTx to group statements atomically.
+type DB struct {
+	*sql.DB
 }
 
 // DefaultPath returns the default database location for this OS user.
@@ -86,7 +69,7 @@ func ResolvePath() (string, error) {
 }
 
 // Open opens (creating if needed) the database at path and applies migrations.
-func Open(ctx context.Context, path string) (*Database, error) {
+func Open(ctx context.Context, path string) (*DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
@@ -99,7 +82,7 @@ func Open(ctx context.Context, path string) (*Database, error) {
 	if err != nil {
 		return nil, err
 	}
-	d := &Database{Repositories: newRepositories(conn), conn: conn}
+	d := &DB{DB: conn}
 	if err := d.migrate(ctx); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("migrating database: %w", err)
@@ -107,18 +90,15 @@ func Open(ctx context.Context, path string) (*Database, error) {
 	return d, nil
 }
 
-// Close closes the database.
-func (d *Database) Close() error { return d.conn.Close() }
-
-// InTx runs fn with repositories bound to one transaction. The transaction
-// is committed if fn returns nil and rolled back otherwise.
-func (d *Database) InTx(ctx context.Context, fn func(tx Repositories) error) error {
-	tx, err := d.conn.BeginTx(ctx, nil)
+// InTx runs fn with one transaction; build repositories on tx to use it.
+// The transaction is committed if fn returns nil and rolled back otherwise.
+func (d *DB) InTx(ctx context.Context, fn func(tx Querier) error) error {
+	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback() // no-op after Commit
-	if err := fn(newRepositories(tx)); err != nil {
+	if err := fn(tx); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -130,7 +110,7 @@ func (d *Database) InTx(ctx context.Context, fn func(tx Repositories) error) err
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-func (d *Database) migrate(ctx context.Context) error {
+func (d *DB) migrate(ctx context.Context) error {
 	if err := d.upgradeLegacyVersionTable(ctx); err != nil {
 		return err
 	}
@@ -138,11 +118,11 @@ func (d *Database) migrate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	drv, err := sqlite.WithInstance(d.conn, &sqlite.Config{})
+	drv, err := sqlite.WithInstance(d.DB, &sqlite.Config{})
 	if err != nil {
 		return err
 	}
-	// Not m.Close(): that would close d.conn, which the Database still owns.
+	// Not m.Close(): that would close the connection, which d still owns.
 	m, err := migrate.NewWithInstance("iofs", src, "sqlite", drv)
 	if err != nil {
 		return err
@@ -157,15 +137,15 @@ func (d *Database) migrate(ctx context.Context) error {
 // the pre-golang-migrate migrator (version only, one row per migration) to
 // golang-migrate's format (a single version + dirty row), keeping the
 // applied version so existing databases aren't migrated twice.
-func (d *Database) upgradeLegacyVersionTable(ctx context.Context) error {
+func (d *DB) upgradeLegacyVersionTable(ctx context.Context) error {
 	var legacy bool
-	err := d.conn.QueryRowContext(ctx, `
+	err := d.QueryRowContext(ctx, `
 SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations')
    AND NOT EXISTS (SELECT 1 FROM pragma_table_info('schema_migrations') WHERE name = 'dirty')`).Scan(&legacy)
 	if err != nil || !legacy {
 		return err
 	}
-	tx, err := d.conn.BeginTx(ctx, nil)
+	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -189,8 +169,9 @@ CREATE UNIQUE INDEX version_unique ON schema_migrations (version);`); err != nil
 	return tx.Commit()
 }
 
-// expectOne turns "no rows affected" into ErrNotFound.
-func expectOne(res sql.Result, err error) error {
+// ExpectOne turns "no rows affected" into ErrNotFound. Pass it the results
+// of an ExecContext call.
+func ExpectOne(res sql.Result, err error) error {
 	if err != nil {
 		return err
 	}

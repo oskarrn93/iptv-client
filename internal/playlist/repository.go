@@ -1,4 +1,4 @@
-package repository
+package playlist
 
 import (
 	"context"
@@ -7,17 +7,20 @@ import (
 	"fmt"
 	"time"
 
-	"iptv-client/internal/model"
+	"iptv-client/internal/database"
 )
 
-// PlaylistRepository reads and writes the playlists table.
-type PlaylistRepository struct {
-	q Querier
+// Repository reads and writes the playlists table.
+type Repository struct {
+	q database.Querier
 }
 
+// NewRepository returns a Repository that runs its statements on q.
+func NewRepository(q database.Querier) *Repository { return &Repository{q: q} }
+
 // Create inserts a playlist (with no channels yet) and returns its ID.
-func (r *PlaylistRepository) Create(ctx context.Context, name string, t model.SourceType, source string, createdAt time.Time) (int64, error) {
-	if t != model.SourceURL && t != model.SourceFile {
+func (r *Repository) Create(ctx context.Context, name string, t SourceType, source string, createdAt time.Time) (int64, error) {
+	if t != SourceURL && t != SourceFile {
 		return 0, fmt.Errorf("invalid source type %q", t)
 	}
 	res, err := r.q.ExecContext(ctx, `
@@ -31,20 +34,20 @@ func (r *PlaylistRepository) Create(ctx context.Context, name string, t model.So
 }
 
 // Get returns one playlist.
-func (r *PlaylistRepository) Get(ctx context.Context, id int64) (model.Playlist, error) {
+func (r *Repository) Get(ctx context.Context, id int64) (Playlist, error) {
 	row := r.q.QueryRowContext(ctx, `
 		SELECT id, name, source_type, source, etag, last_modified, last_refreshed_at, channel_count, created_at
 		FROM playlists
 		WHERE id = ?`, id)
 	p, err := scanPlaylist(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		return model.Playlist{}, fmt.Errorf("playlist %d: %w", id, ErrNotFound)
+		return Playlist{}, fmt.Errorf("playlist %d: %w", id, database.ErrNotFound)
 	}
 	return p, err
 }
 
 // Exists reports whether a playlist with this ID exists.
-func (r *PlaylistRepository) Exists(ctx context.Context, id int64) (bool, error) {
+func (r *Repository) Exists(ctx context.Context, id int64) (bool, error) {
 	var exists bool
 	err := r.q.QueryRowContext(ctx, `
 		SELECT EXISTS (SELECT 1 FROM playlists WHERE id = ?)`, id).Scan(&exists)
@@ -52,7 +55,7 @@ func (r *PlaylistRepository) Exists(ctx context.Context, id int64) (bool, error)
 }
 
 // List returns all playlists ordered by name.
-func (r *PlaylistRepository) List(ctx context.Context) ([]model.Playlist, error) {
+func (r *Repository) List(ctx context.Context) ([]Playlist, error) {
 	rows, err := r.q.QueryContext(ctx, `
 		SELECT id, name, source_type, source, etag, last_modified, last_refreshed_at, channel_count, created_at
 		FROM playlists
@@ -61,7 +64,7 @@ func (r *PlaylistRepository) List(ctx context.Context) ([]model.Playlist, error)
 		return nil, err
 	}
 	defer rows.Close()
-	var out []model.Playlist
+	var out []Playlist
 	for rows.Next() {
 		p, err := scanPlaylist(rows)
 		if err != nil {
@@ -73,8 +76,8 @@ func (r *PlaylistRepository) List(ctx context.Context) ([]model.Playlist, error)
 }
 
 // Rename changes a playlist's display name.
-func (r *PlaylistRepository) Rename(ctx context.Context, id int64, name string) error {
-	return expectOne(r.q.ExecContext(ctx, `
+func (r *Repository) Rename(ctx context.Context, id int64, name string) error {
+	return database.ExpectOne(r.q.ExecContext(ctx, `
 		UPDATE playlists
 		SET name = ?
 		WHERE id = ?`, name, id))
@@ -82,36 +85,36 @@ func (r *PlaylistRepository) Rename(ctx context.Context, id int64, name string) 
 
 // Delete removes a playlist row. Its channels and favorites are removed by
 // ON DELETE CASCADE, but the search index is not: call
-// ChannelRepository.DeleteAllInPlaylist first, in the same transaction.
-func (r *PlaylistRepository) Delete(ctx context.Context, id int64) error {
-	return expectOne(r.q.ExecContext(ctx, `
+// channel.Repository.DeleteAllInPlaylist first, in the same transaction.
+func (r *Repository) Delete(ctx context.Context, id int64) error {
+	return database.ExpectOne(r.q.ExecContext(ctx, `
 		DELETE FROM playlists
 		WHERE id = ?`, id))
 }
 
 // MarkRefreshed records a successful refresh that returned no new data.
-func (r *PlaylistRepository) MarkRefreshed(ctx context.Context, id int64, refreshedAt time.Time) error {
-	return expectOne(r.q.ExecContext(ctx, `
+func (r *Repository) MarkRefreshed(ctx context.Context, id int64, refreshedAt time.Time) error {
+	return database.ExpectOne(r.q.ExecContext(ctx, `
 		UPDATE playlists
 		SET last_refreshed_at = ?
 		WHERE id = ?`, refreshedAt.Unix(), id))
 }
 
 // SaveRefresh records a successful refresh that replaced the channels.
-func (r *PlaylistRepository) SaveRefresh(ctx context.Context, id int64, channelCount int, etag, lastModified string, refreshedAt time.Time) error {
-	return expectOne(r.q.ExecContext(ctx, `
+func (r *Repository) SaveRefresh(ctx context.Context, id int64, channelCount int, etag, lastModified string, refreshedAt time.Time) error {
+	return database.ExpectOne(r.q.ExecContext(ctx, `
 		UPDATE playlists
 		SET channel_count = ?, etag = ?, last_modified = ?, last_refreshed_at = ?
 		WHERE id = ?`, channelCount, etag, lastModified, refreshedAt.Unix(), id))
 }
 
 // scanPlaylist reads the columns selected by Get and List, in that order.
-func scanPlaylist(row interface{ Scan(...any) error }) (model.Playlist, error) {
-	var p model.Playlist
+func scanPlaylist(row interface{ Scan(...any) error }) (Playlist, error) {
+	var p Playlist
 	var refreshed, created int64
 	err := row.Scan(&p.ID, &p.Name, &p.SourceType, &p.Source, &p.ETag, &p.LastModified, &refreshed, &p.ChannelCount, &created)
 	if err != nil {
-		return model.Playlist{}, err
+		return Playlist{}, err
 	}
 	if refreshed > 0 {
 		p.LastRefreshedAt = time.Unix(refreshed, 0)
