@@ -77,3 +77,42 @@ func TestSetPlayerPath(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestLogLevel(t *testing.T) {
+	ctx := context.Background()
+	svc := newService(t)
+	level := func() string {
+		t.Helper()
+		l, err := svc.LogLevel(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return l
+	}
+	if got := level(); got != "info" {
+		t.Errorf("default = %q", got)
+	}
+	if err := svc.SetLogLevel(ctx, "warn"); err != nil {
+		t.Fatal(err)
+	}
+	if got := level(); got != "warn" {
+		t.Errorf("after warn = %q", got)
+	}
+	if err := svc.SetLogLevel(ctx, "debug"); err != nil {
+		t.Fatal(err)
+	}
+	if got := level(); got != "warn" {
+		t.Errorf("debug was saved: %q", got)
+	}
+	for _, bad := range []string{"", "trace", "DEBUG", "info; drop table"} {
+		if err := svc.SetLogLevel(ctx, bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	if err := svc.SetLogLevel(ctx, "info"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := svc.repo.Get(ctx, KeyLogLevel); v != "" {
+		t.Errorf("info stored as %q, want deleted", v)
+	}
+}

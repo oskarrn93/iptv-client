@@ -218,6 +218,37 @@ try {
   await page.waitForSelector('dialog[open]', { state: 'detached' });
   check('settings save', (await page.evaluate(() => window.__userAgent)) === 'MyPlayer/1.0');
 
+  // Logging: the level is saved, the folder opens from Go, and uncaught
+  // frontend errors reach the log.
+  await page.click('#settings-button');
+  await page.waitForSelector('dialog[open] #log-level');
+  check('log level defaults to info', (await page.inputValue('#log-level')) === 'info');
+  await page.click('dialog[open] button:has-text("Open log folder")');
+  await waitFor(() => window.__calls.some(([m]) => m === 'OpenLogFolder'));
+  check('open log folder', true);
+  await page.selectOption('#log-level', 'warn');
+  await page.click('dialog[open] button:has-text("Save")');
+  await page.waitForSelector('dialog[open]', { state: 'detached' });
+  await page.click('#settings-button');
+  await page.waitForSelector('dialog[open] #log-level');
+  check('log level saved', (await page.inputValue('#log-level')) === 'warn');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('dialog[open]', { state: 'detached' });
+  await page.evaluate(() =>
+    setTimeout(() => {
+      throw new Error('e2e boom');
+    }),
+  );
+  await waitFor(() => window.__logs.some((l) => l.msg === 'uncaught error'));
+  const logged = await page.evaluate(() => window.__logs.find((l) => l.msg === 'uncaught error'));
+  check(
+    'uncaught error logged',
+    logged.level === 'error' && logged.attrs.message === 'Error: e2e boom' && 'stack' in logged.attrs,
+    JSON.stringify(logged),
+  );
+  // The deliberate error is not a problem with the app.
+  problems.splice(0, problems.length, ...problems.filter((p) => !p.includes('e2e boom')));
+
   // Updates: up to date, then a newer release confirmed and installed.
   await page.click('#settings-button');
   await page.click('dialog[open] button:has-text("Check for updates")');

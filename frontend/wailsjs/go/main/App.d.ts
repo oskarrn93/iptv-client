@@ -28,6 +28,10 @@ export function ListGroups(arg1:number):Promise<Array<main.Group>>;
 
 export function ListPlaylists():Promise<Array<main.Playlist>>;
 
+export function Log(arg1:string,arg2:string,arg3:Record<string, string>):Promise<void>;
+
+export function OpenLogFolder():Promise<void>;
+
 export function Play(arg1:number):Promise<string>;
 
 export function RefreshPlaylist(arg1:number,arg2:boolean):Promise<main.ImportResult>;
@@ -37,5 +41,7 @@ export function RenamePlaylist(arg1:number,arg2:string):Promise<void>;
 export function ResetPlayer():Promise<main.Settings>;
 
 export function SetFavorite(arg1:number,arg2:boolean):Promise<void>;
+
+export function SetLogLevel(arg1:string):Promise<void>;
 
 export function SetUserAgent(arg1:string):Promise<void>;

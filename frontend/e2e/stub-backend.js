@@ -49,6 +49,7 @@
   };
 
   window.__calls = [];
+  window.__logs = [];
   const api = {
     async ListPlaylists() {
       return [...playlists].sort((a, b) => a.name.localeCompare(b.name));
@@ -125,6 +126,7 @@
         playerError: '',
         userAgent: window.__userAgent ?? '',
         defaultAgent: 'VLC/3.0.21 LibVLC/3.0.21',
+        logLevel: window.__logLevel ?? 'info',
         dataDir: 'C:\\Users\\test\\AppData\\Roaming\\IPTVClient',
         version: 'v0.0.0-test',
       };
@@ -134,6 +136,17 @@
     },
     async ResetPlayer() {
       return api.GetSettings();
+    },
+    async SetLogLevel(level) {
+      if (!['debug', 'info', 'warn', 'error'].includes(level)) throw `invalid log level "${level}"`;
+      window.__logLevel = level;
+    },
+    async OpenLogFolder() {
+      window.__calls.push(['OpenLogFolder']);
+    },
+    // Mirrors App.Log: never fails; lines are kept for the tests.
+    async Log(level, msg, attrs) {
+      window.__logs.push({ level, msg, attrs });
     },
     async SetUserAgent(ua) {
       if (/[\r\n]/.test(ua)) throw 'invalid User-Agent';
