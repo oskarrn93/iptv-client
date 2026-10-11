@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 )
@@ -41,24 +42,32 @@ type Result struct {
 // ErrTooLarge is returned by Body.Read once MaxBytes is exceeded.
 var ErrTooLarge = errors.New("playlist is larger than the allowed maximum")
 
-var defaultClient = &http.Client{
-	Transport: &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           (&net.Dialer{Timeout: 15 * time.Second}).DialContext,
-		TLSHandshakeTimeout:   15 * time.Second,
-		ResponseHeaderTimeout: 60 * time.Second,
-		// Go transparently requests and decodes gzip when this is false.
-		DisableCompression: false,
-	},
-	CheckRedirect: func(req *http.Request, via []*http.Request) error {
-		if len(via) >= 10 {
-			return errors.New("too many redirects")
-		}
-		if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
-			return fmt.Errorf("redirect to unsupported scheme %q", req.URL.Scheme)
-		}
-		return nil
-	},
+var defaultClient = NewClient("http", "https")
+
+// NewClient returns a client with connect, TLS and response-header timeouts
+// that follows at most 10 redirects, and only to the given URL schemes. It has
+// no overall timeout, which would cut off slow downloads; callers bound each
+// request with its context.
+func NewClient(schemes ...string) *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           (&net.Dialer{Timeout: 15 * time.Second}).DialContext,
+			TLSHandshakeTimeout:   15 * time.Second,
+			ResponseHeaderTimeout: 60 * time.Second,
+			// Go transparently requests and decodes gzip when this is false.
+			DisableCompression: false,
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("too many redirects")
+			}
+			if !slices.Contains(schemes, req.URL.Scheme) {
+				return fmt.Errorf("redirect to unsupported scheme %q", req.URL.Scheme)
+			}
+			return nil
+		},
+	}
 }
 
 // URL opens a playlist over HTTP(S). The caller must close Result.Body.
@@ -90,7 +99,7 @@ func URL(ctx context.Context, rawURL string, o Options) (Result, error) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return Result{}, fmt.Errorf("fetching %s: %s", Redact(rawURL), describe(err))
+		return Result{}, fmt.Errorf("fetching %s: %s", Redact(rawURL), Describe(err))
 	}
 	switch {
 	case resp.StatusCode == http.StatusNotModified:
@@ -138,8 +147,8 @@ func Redact(rawURL string) string {
 	return s
 }
 
-// describe turns a transport error into a short message without the URL.
-func describe(err error) string {
+// Describe turns a transport error into a short message without the URL.
+func Describe(err error) string {
 	var ue *url.Error
 	if errors.As(err, &ue) {
 		err = ue.Err
