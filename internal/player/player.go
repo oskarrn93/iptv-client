@@ -124,12 +124,7 @@ func Find(override string) (string, error) {
 		}
 		return override, nil
 	}
-	for _, p := range candidates() {
-		if isFile(p) {
-			return p, nil
-		}
-	}
-	if p, err := exec.LookPath("vlc"); err == nil {
+	if p, ok := locate(locators()); ok {
 		return p, nil
 	}
 	return "", ErrNotFound

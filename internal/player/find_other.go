@@ -3,7 +3,7 @@
 package player
 
 // Other systems (Linux, used for CI) are not release targets; check the usual
-// install paths and fall back to PATH lookup in Find.
-func candidates() []string {
-	return []string{"/usr/bin/vlc", "/snap/bin/vlc"}
+// install paths before the PATH lookup.
+func platformLocators() []locator {
+	return []locator{fixedPaths{"/usr/bin/vlc", "/snap/bin/vlc"}}
 }

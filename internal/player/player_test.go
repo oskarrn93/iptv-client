@@ -125,3 +125,23 @@ func TestValidateExecutable(t *testing.T) {
 		t.Error("Find accepted a non-VLC override")
 	}
 }
+
+func TestLocate(t *testing.T) {
+	dir := t.TempDir()
+	vlc := filepath.Join(dir, "VLC.app", "Contents", "MacOS", "VLC")
+	if err := os.MkdirAll(filepath.Dir(vlc), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(vlc, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(dir, "missing", "vlc")
+
+	got, ok := locate([]locator{fixedPaths{missing, dir}, appBundles{dir}})
+	if !ok || got != vlc {
+		t.Errorf("locate = %q, %v; want %q, true (skipping missing files and directories)", got, ok, vlc)
+	}
+	if _, ok := locate([]locator{fixedPaths{missing}}); ok {
+		t.Error("locate found a missing file")
+	}
+}
