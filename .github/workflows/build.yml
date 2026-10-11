@@ -32,12 +32,21 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: node .github/stamp-version.js
+      # Wails runs makensis from PATH. Choco installs NSIS without adding it to
+      # PATH, so add the install dir explicitly.
+      - name: Install NSIS
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) { choco install nsis -y --no-progress }
+          "C:\Program Files (x86)\NSIS" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       # -trimpath; no UPX (packed binaries trigger antivirus false positives).
-      - run: go tool wails build -clean -trimpath -ldflags "-X main.version=${{ env.VERSION }}"
+      # -nsis also builds build/bin/iptv-client-amd64-installer.exe from
+      # build/windows/installer/project.nsi.
+      - run: go tool wails build -clean -trimpath -nsis -ldflags "-X main.version=${{ env.VERSION }}"
+      - run: Move-Item build/bin/iptv-client-amd64-installer.exe iptv-client-windows-amd64-setup.exe
       - uses: actions/upload-artifact@v4
         with:
           name: iptv-client-windows-amd64
-          path: build/bin/iptv-client.exe
+          path: iptv-client-windows-amd64-setup.exe
 
   # macOS runners cost 10x Actions minutes on private repos, which is why
   # binaries are only built on tags or manual runs.
@@ -62,11 +71,21 @@ jobs:
       - run: go tool wails build -clean -trimpath -platform darwin/universal -ldflags "-X main.version=${{ env.VERSION }}"
       # Ad-hoc signature (no developer account needed); required on Apple Silicon.
       - run: codesign --force --deep --sign - build/bin/iptv-client.app
-      - run: ditto -c -k --keepParent build/bin/iptv-client.app iptv-client-macos-universal.zip
+      # DMG window with the app next to an Applications shortcut to drag onto.
+      # create-dmg copies the contents of its source folder, so stage the app
+      # alone in one.
+      - run: brew install create-dmg
+      - run: |
+          mkdir dmg && ditto build/bin/iptv-client.app dmg/iptv-client.app
+          create-dmg --volname "IPTV Client" \
+            --window-size 540 380 --icon-size 128 \
+            --icon iptv-client.app 140 180 --hide-extension iptv-client.app \
+            --app-drop-link 400 180 \
+            iptv-client-macos-universal.dmg dmg
       - uses: actions/upload-artifact@v4
         with:
           name: iptv-client-macos-universal
-          path: iptv-client-macos-universal.zip
+          path: iptv-client-macos-universal.dmg
 
   release:
     needs: [build-windows, build-macos]
@@ -81,10 +100,10 @@ jobs:
           path: dist
       - run: |
           cd dist
-          (cd iptv-client-windows-amd64 && zip -q ../iptv-client-windows-amd64.zip iptv-client.exe)
           # Install instructions first, then GitHub's generated changelog.
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
             --notes-file ../.github/release-notes.md --generate-notes \
-            iptv-client-windows-amd64.zip iptv-client-macos-universal/iptv-client-macos-universal.zip
+            iptv-client-windows-amd64/iptv-client-windows-amd64-setup.exe \
+            iptv-client-macos-universal/iptv-client-macos-universal.dmg
         env:
           GH_TOKEN: ${{ github.token }}

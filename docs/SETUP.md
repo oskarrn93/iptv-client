@@ -167,9 +167,9 @@ testing with large playlists without touching your own data. The app and
   check and UI tests in Chrome; Go tests on Windows and a check that the
   committed bindings are current.
 - **`.github/workflows/build.yml`, tags `v*` (or manual run):** runs `ci.yml`
-  first, then builds Windows and macOS universal (ad-hoc signed) binaries,
-  uploads them as artifacts and, on tags, creates a GitHub Release with both
-  zips.
+  first, then builds a Windows NSIS installer and a macOS universal
+  (ad-hoc signed) app in a drag-to-Applications DMG, uploads them as
+  artifacts and, on tags, creates a GitHub Release with both.
 
 `.github/dependabot.yml` opens weekly PRs for Go modules, frontend npm
 packages and GitHub Actions. Minor/patch bumps are grouped into one PR per
@@ -189,7 +189,8 @@ repo under **Settings → Code security** (the config file can't enable them).
    version shown in Settings (`-X main.version`), and into `wails.json` →
    `info.productVersion` (`.github/stamp-version.js`), which becomes the
    Windows file version and the macOS bundle version. It then creates a GitHub
-   Release with both zips. The install notes in `.github/release-notes.md`
+   Release with `iptv-client-windows-amd64-setup.exe` and
+   `iptv-client-macos-universal.dmg`. The install notes in `.github/release-notes.md`
    come first, followed by GitHub's generated changelog.
 
 The committed `productVersion` stays at the `0.0.0` placeholder. Don't bump it
@@ -204,14 +205,36 @@ by hand. Local builds show version `dev` unless you pass
 - Name, company and copyright: `wails.json` → `info`.
 - macOS bundle ID: `build/darwin/Info.plist` (`com.oskarrosen.iptvclient`).
 
+### Installers
+
+- **Windows:** `go tool wails build -nsis` also builds
+  `build/bin/iptv-client-amd64-installer.exe` from
+  `build/windows/installer/project.nsi`. It needs NSIS
+  (`winget install NSIS.NSIS`, then add `C:\Program Files (x86)\NSIS` to
+  `PATH`). The installer installs per machine into Program Files (asks for
+  admin), adds Start menu and desktop shortcuts, installs WebView2 if missing
+  and registers an uninstaller. Uninstalling keeps the playlist database.
+  Wails regenerates `wails_tools.nsh` on every `-nsis` build, so edit
+  `project.nsi` instead.
+- **macOS:** CI stages the `.app` alone in a folder and runs `create-dmg`
+  (`brew install create-dmg`), which places the app next to an Applications
+  shortcut.
+
+Code signing can be added later without restructuring: sign the exe and the
+installer on Windows (e.g. Azure Trusted Signing; `project.nsi` has
+`!finalize` hooks), and on macOS replace the ad-hoc signature with a
+Developer ID one, then notarize and staple the DMG.
+
 ## Running unsigned builds (for end users)
 
 The app is not code-signed (no paid developer account).
 
-- **Windows:** SmartScreen shows "Windows protected your PC" → **More info** →
-  **Run anyway**. On machines with Smart App Control enabled the app may be
-  blocked outright.
-- **macOS:** a downloaded build is quarantined. Either open it once, then go to
+- **Windows:** SmartScreen shows "Windows protected your PC" on the installer →
+  **More info** → **Run anyway**, and the admin prompt shows "Unknown
+  publisher". On machines with Smart App Control enabled the installer or the
+  app may be blocked outright.
+- **macOS:** a downloaded build is quarantined, including the app dragged out
+  of the DMG. Either open it once, then go to
   **System Settings → Privacy & Security → Open Anyway**, or run:
   ```bash
   xattr -dr com.apple.quarantine /Applications/iptv-client.app
