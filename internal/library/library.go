@@ -6,7 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,8 +35,6 @@ const progressEvery = 1000
 type Library struct {
 	Store              *store.Store
 	MinRefreshInterval time.Duration
-	MaxBytes           int64
-	HTTPClient         *http.Client // nil = fetch package default
 	Now                func() time.Time
 }
 
@@ -58,8 +56,13 @@ type RefreshResult struct {
 type TooSoonError struct{ Remaining time.Duration }
 
 func (e *TooSoonError) Error() string {
-	return fmt.Sprintf("playlist was refreshed recently; try again in %s (refreshing too often can get your provider account blocked)",
-		e.Remaining.Round(time.Minute))
+	return fmt.Sprintf("playlist was refreshed recently; try again in %d min (refreshing too often can get your provider account blocked)",
+		e.Minutes())
+}
+
+// Minutes is the remaining wait rounded to whole minutes, at least 1.
+func (e *TooSoonError) Minutes() int {
+	return max(1, int(e.Remaining.Round(time.Minute).Minutes()))
 }
 
 // ErrNoChannels is returned when a source contains no playable channels.
@@ -107,7 +110,7 @@ func (l *Library) Refresh(ctx context.Context, id int64, force bool, progress fu
 		return RefreshResult{}, err
 	}
 	if !force && p.SourceType == store.SourceURL && !p.LastRefreshedAt.IsZero() {
-		if since := l.now().Sub(p.LastRefreshedAt); since < l.MinRefreshInterval {
+		if since := l.Now().Sub(p.LastRefreshedAt); since < l.MinRefreshInterval {
 			return RefreshResult{}, &TooSoonError{Remaining: l.MinRefreshInterval - since}
 		}
 	}
@@ -116,7 +119,7 @@ func (l *Library) Refresh(ctx context.Context, id int64, force bool, progress fu
 	if err != nil {
 		return RefreshResult{}, err
 	}
-	opts := fetch.Options{UserAgent: ua, MaxBytes: l.MaxBytes, Client: l.HTTPClient}
+	opts := fetch.Options{UserAgent: ua}
 	var fr fetch.Result
 	switch p.SourceType {
 	case store.SourceURL:
@@ -134,7 +137,7 @@ func (l *Library) Refresh(ctx context.Context, id int64, force bool, progress fu
 	defer fr.Body.Close()
 
 	var res RefreshResult
-	_, err = l.Store.ReplaceChannels(ctx, id, fr.ETag, fr.LastModified, func(insert func(store.ChannelInput) error) error {
+	err = l.Store.ReplaceChannels(ctx, id, fr.ETag, fr.LastModified, func(insert func(store.ChannelInput) error) error {
 		pr, err := m3u.Parse(fr.Body, func(e m3u.Entry) error {
 			if player.ValidateURL(e.URL) != nil {
 				res.Skipped++
@@ -203,10 +206,12 @@ func (l *Library) VLCPath(ctx context.Context) (string, error) {
 }
 
 // SetVLCPath stores a VLC location chosen by the user ("" = auto-detect).
-// Only call this with a path the user picked in a native file dialog.
+// A macOS VLC.app bundle is accepted. Only call this with a path the user
+// picked in a native file dialog.
 func (l *Library) SetVLCPath(ctx context.Context, path string) error {
 	if path != "" {
-		if err := player.ValidateExecutable(path); err != nil {
+		var err error
+		if path, err = player.ResolveExecutable(path); err != nil {
 			return err
 		}
 	}
@@ -222,11 +227,36 @@ func (l *Library) SetUserAgent(ctx context.Context, ua string) error {
 	return l.Store.SetSetting(ctx, SettingUserAgent, ua)
 }
 
-func (l *Library) now() time.Time {
-	if l.Now != nil {
-		return l.Now()
+// Settings is the user-facing configuration with VLC resolved.
+type Settings struct {
+	VLCPath     string // "" if VLC was not found
+	VLCOverride bool   // VLCPath was chosen by the user
+	VLCError    error  // why VLC was not found
+	UserAgent   string // "" = fetch.DefaultUserAgent
+}
+
+// Settings returns the current settings.
+func (l *Library) Settings(ctx context.Context) (Settings, error) {
+	override, err := l.Store.GetSetting(ctx, SettingVLCPath)
+	if err != nil {
+		return Settings{}, err
 	}
-	return time.Now()
+	ua, err := l.Store.GetSetting(ctx, SettingUserAgent)
+	if err != nil {
+		return Settings{}, err
+	}
+	s := Settings{VLCOverride: override != "", UserAgent: ua}
+	s.VLCPath, s.VLCError = player.Find(override)
+	return s, nil
+}
+
+// RenamePlaylist changes a playlist's display name.
+func (l *Library) RenamePlaylist(ctx context.Context, id int64, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("name cannot be empty")
+	}
+	return l.Store.RenamePlaylist(ctx, id, name)
 }
 
 func sourceType(source string) (store.SourceType, error) {
@@ -253,6 +283,8 @@ func defaultName(t store.SourceType, source string) string {
 	if t == store.SourceFile {
 		return strings.TrimSuffix(filepath.Base(source), filepath.Ext(source))
 	}
-	host := strings.TrimSuffix(fetch.Redact(source), "/…")
-	return strings.TrimPrefix(strings.TrimPrefix(host, "https://"), "http://")
+	if u, err := url.Parse(source); err == nil && u.Host != "" {
+		return u.Host // never the user info, path or query (credentials)
+	}
+	return "Playlist"
 }

@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"sync"
 	"time"
 
@@ -13,7 +13,6 @@ import (
 
 	"iptv-client/internal/fetch"
 	"iptv-client/internal/library"
-	"iptv-client/internal/player"
 	"iptv-client/internal/store"
 )
 
@@ -35,7 +34,7 @@ func NewApp() *App { return &App{} }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	path, err := databasePath()
+	path, err := store.ResolvePath()
 	if err == nil {
 		var s *store.Store
 		if s, err = store.Open(ctx, path); err == nil {
@@ -173,7 +172,7 @@ func (a *App) add(name, source string) (ImportResult, error) {
 	defer done()
 	p, res, err := l.AddPlaylist(ctx, name, source, a.progress)
 	if err != nil {
-		return ImportResult{}, friendly(err)
+		return ImportResult{}, importError(err)
 	}
 	dto := toPlaylist(p)
 	return ImportResult{Playlist: &dto, Imported: res.Imported, Skipped: res.Skipped}, nil
@@ -194,10 +193,10 @@ func (a *App) RefreshPlaylist(id int64, force bool) (ImportResult, error) {
 	res, err := l.Refresh(ctx, id, force, a.progress)
 	var tooSoon *library.TooSoonError
 	if errors.As(err, &tooSoon) {
-		return ImportResult{TooSoonMinutes: max(1, int(tooSoon.Remaining.Round(time.Minute).Minutes()))}, nil
+		return ImportResult{TooSoonMinutes: tooSoon.Minutes()}, nil
 	}
 	if err != nil {
-		return ImportResult{Skipped: res.Skipped}, friendly(err)
+		return ImportResult{Skipped: res.Skipped}, importError(err)
 	}
 	p, err := l.Store.GetPlaylist(a.ctx, id)
 	if err != nil {
@@ -222,10 +221,7 @@ func (a *App) RenamePlaylist(id int64, name string) error {
 	if err != nil {
 		return err
 	}
-	if name == "" {
-		return errors.New("name cannot be empty")
-	}
-	return l.Store.RenamePlaylist(a.ctx, id, name)
+	return l.RenamePlaylist(a.ctx, id, name)
 }
 
 // DeletePlaylist removes a playlist and its favorites.
@@ -270,7 +266,7 @@ func (a *App) ChannelIDs(q ChannelQuery) ([]int64, error) {
 	return l.Store.ChannelIDs(a.ctx, f)
 }
 
-// Channels returns rows for up to 500 IDs, in the order given.
+// Channels returns the rows for ids, in the order given.
 func (a *App) Channels(ids []int64) ([]Channel, error) {
 	l, err := a.ready()
 	if err != nil {
@@ -302,7 +298,7 @@ func (a *App) Play(channelID int64) error {
 	if err != nil {
 		return err
 	}
-	return friendly(l.Play(a.ctx, channelID))
+	return l.Play(a.ctx, channelID)
 }
 
 // --- settings ---
@@ -313,19 +309,18 @@ func (a *App) GetSettings() (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
-	override, err := l.Store.GetSetting(a.ctx, library.SettingVLCPath)
+	ls, err := l.Settings(a.ctx)
 	if err != nil {
 		return Settings{}, err
 	}
-	ua, err := l.Store.GetSetting(a.ctx, library.SettingUserAgent)
-	if err != nil {
-		return Settings{}, err
+	s := Settings{
+		VLCPath: ls.VLCPath, VLCOverride: ls.VLCOverride, UserAgent: ls.UserAgent,
+		DefaultAgent: fetch.DefaultUserAgent, Version: version,
 	}
-	s := Settings{VLCOverride: override != "", UserAgent: ua, DefaultAgent: fetch.DefaultUserAgent, Version: version}
-	if s.VLCPath, err = l.VLCPath(a.ctx); err != nil {
-		s.VLCError = err.Error()
+	if ls.VLCError != nil {
+		s.VLCError = ls.VLCError.Error()
 	}
-	if p, err := databasePath(); err == nil {
+	if p, err := store.ResolvePath(); err == nil {
 		s.DataDir = filepath.Dir(p)
 	}
 	return s, nil
@@ -337,15 +332,16 @@ func (a *App) ChooseVLC() (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
-	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title:   "Locate VLC",
-		Filters: vlcFilters(),
-	})
+	opts := runtime.OpenDialogOptions{Title: "Locate VLC"}
+	if goruntime.GOOS == "windows" {
+		opts.Filters = []runtime.FileFilter{{DisplayName: "VLC (vlc.exe)", Pattern: "vlc.exe"}}
+	}
+	path, err := runtime.OpenFileDialog(a.ctx, opts)
 	if err != nil {
 		return Settings{}, err
 	}
 	if path != "" {
-		if err := l.SetVLCPath(a.ctx, vlcExecutable(path)); err != nil {
+		if err := l.SetVLCPath(a.ctx, path); err != nil {
 			return Settings{}, err
 		}
 	}
@@ -374,16 +370,6 @@ func (a *App) SetUserAgent(ua string) error {
 }
 
 // --- helpers ---
-
-// DatabaseEnv overrides the database location (development and testing).
-const DatabaseEnv = "IPTV_CLIENT_DB"
-
-func databasePath() (string, error) {
-	if p := os.Getenv(DatabaseEnv); p != "" {
-		return filepath.Abs(p)
-	}
-	return store.DefaultPath()
-}
 
 // beginImport allows one import at a time and returns its cancellable context.
 func (a *App) beginImport() (context.Context, func(), error) {
@@ -419,19 +405,16 @@ func toPlaylist(p store.Playlist) Playlist {
 	}
 }
 
-// friendly rewrites errors that would otherwise read poorly in the UI.
-func friendly(err error) error {
+// importError rewrites add/refresh errors that would otherwise read poorly
+// in the UI.
+func importError(err error) error {
 	switch {
-	case err == nil:
-		return nil
 	case errors.Is(err, context.Canceled):
 		return errors.New("import cancelled; the previous channel list was kept")
 	case errors.Is(err, context.DeadlineExceeded):
 		return errors.New("import timed out; the previous channel list was kept")
 	case errors.Is(err, fetch.ErrTooLarge):
 		return fmt.Errorf("%w (limit %d MB)", err, fetch.DefaultMaxBytes>>20)
-	case errors.Is(err, player.ErrNotFound):
-		return errors.New("VLC was not found. Install it from videolan.org, or choose its location in Settings")
 	}
 	return err
 }

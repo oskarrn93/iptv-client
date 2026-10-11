@@ -9,11 +9,12 @@ package player
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -92,12 +93,7 @@ func Args(title, streamURL string, opts map[string]string) ([]string, error) {
 		args = append(args, "--meta-title="+t)
 	}
 	safe := SanitizeOptions(opts)
-	keys := make([]string, 0, len(safe))
-	for k := range safe {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
+	for _, k := range slices.Sorted(maps.Keys(safe)) {
 		args = append(args, "--"+k+"="+safe[k])
 	}
 	return append(args, streamURL), nil
@@ -153,6 +149,15 @@ func ValidateExecutable(path string) error {
 	return nil
 }
 
+// ResolveExecutable maps a path the user picked to the VLC executable (a
+// macOS VLC.app bundle to the binary inside it) and validates it.
+func ResolveExecutable(picked string) (string, error) {
+	if strings.HasSuffix(strings.ToLower(picked), ".app") {
+		picked = filepath.Join(picked, "Contents", "MacOS", "VLC")
+	}
+	return picked, ValidateExecutable(picked)
+}
+
 func isFile(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && fi.Mode().IsRegular()
@@ -162,18 +167,18 @@ func plainText(v string) bool {
 	return v != "" && !strings.HasPrefix(v, "-") && !hasControl(v)
 }
 
-func hasControl(s string) bool {
-	return strings.ContainsFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f })
-}
+func isControl(r rune) bool { return r < 0x20 || r == 0x7f }
+
+func hasControl(s string) bool { return strings.ContainsFunc(s, isControl) }
 
 func hasControlOrSpace(s string) bool {
-	return strings.ContainsFunc(s, func(r rune) bool { return r <= 0x20 || r == 0x7f })
+	return strings.ContainsFunc(s, func(r rune) bool { return r == ' ' || isControl(r) })
 }
 
 // cleanTitle removes control characters and bounds the length.
 func cleanTitle(s string) string {
 	s = strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
+		if isControl(r) {
 			return -1
 		}
 		return r

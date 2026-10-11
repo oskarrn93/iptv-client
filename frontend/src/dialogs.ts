@@ -10,8 +10,9 @@ export const showDialog = (
   title: string,
   content: Node[],
   buttons: { label: string; value: string; kind?: 'primary' | 'danger' }[],
-  onSubmit?: (value: string, form: HTMLFormElement) => boolean | Promise<boolean>,
+  onSubmit?: (value: string) => boolean | Promise<boolean>,
 ): Promise<string> => {
+  const dialog = h('dialog');
   const form = h(
     'form',
     { method: 'dialog' },
@@ -21,11 +22,13 @@ export const showDialog = (
       'div',
       { class: 'dialog-buttons' },
       ...buttons.map(({ label, value, kind }) =>
-        h('button', { type: value ? 'submit' : 'button', value, class: kind ?? '', dataset: { value } }, label),
+        value
+          ? h('button', { type: 'submit', value, class: kind ?? '' }, label)
+          : h('button', { type: 'button', class: kind ?? '', onclick: () => dialog.close('') }, label),
       ),
     ),
   );
-  const dialog = h('dialog', null, form);
+  dialog.append(form);
   document.body.append(dialog);
 
   return new Promise((resolve) => {
@@ -36,12 +39,11 @@ export const showDialog = (
       const value = (e.submitter as HTMLButtonElement | null)?.value ?? buttons.find((b) => b.value)?.value ?? '';
       busy = true;
       try {
-        if (!onSubmit || (await onSubmit(value, form))) dialog.close(value);
+        if (!onSubmit || (await onSubmit(value))) dialog.close(value);
       } finally {
         busy = false;
       }
     });
-    form.querySelector('button[data-value=""]')?.addEventListener('click', () => dialog.close(''));
     dialog.addEventListener('close', () => {
       dialog.remove();
       resolve(dialog.returnValue);

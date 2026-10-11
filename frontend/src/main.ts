@@ -21,7 +21,7 @@ import type { main } from '../wailsjs/go/models';
 import { EventsOn } from '../wailsjs/runtime/runtime';
 import { ChannelList } from './channel-list';
 import { confirmDialog, promptDialog, showDialog } from './dialogs';
-import { $, debounce, errorMessage, formatCount, h, timeAgo } from './dom';
+import { $, type Child, debounce, errorMessage, formatCount, h, plural, timeAgo } from './dom';
 
 type Selection = { kind: 'all' } | { kind: 'favorites' } | { kind: 'group'; name: string };
 
@@ -60,6 +60,17 @@ const toast = (message: string, kind: 'error' | 'info' = 'error'): void => {
 
 const fail = (error: unknown): void => toast(errorMessage(error));
 
+/** Wraps an async handler so that a rejection is shown as a toast. */
+const guard =
+  <A extends unknown[]>(fn: (...args: A) => Promise<void>) =>
+  async (...args: A): Promise<void> => {
+    try {
+      await fn(...args);
+    } catch (error) {
+      fail(error);
+    }
+  };
+
 const setStatus = (text: string): void => {
   ui.status.textContent = text;
 };
@@ -67,26 +78,18 @@ const setStatus = (text: string): void => {
 // ---------- channel list ----------
 
 const list = new ChannelList($('#channels'), {
-  onPlay: async (channel) => {
-    try {
-      await Play(channel.id);
-      setStatus(`Opened “${channel.name}” in VLC`);
-    } catch (error) {
-      fail(error);
+  onPlay: guard(async (channel) => {
+    await Play(channel.id);
+    setStatus(`Opened “${channel.name}” in VLC`);
+  }),
+  onToggleFavorite: guard(async (channel) => {
+    await SetFavorite(channel.id, !channel.favorite);
+    if (state.selection.kind === 'favorites') {
+      await loadChannels({ keepScroll: true });
+    } else {
+      list.update({ ...channel, favorite: !channel.favorite });
     }
-  },
-  onToggleFavorite: async (channel) => {
-    try {
-      await SetFavorite(channel.id, !channel.favorite);
-      if (state.selection.kind === 'favorites') {
-        await loadChannels({ keepScroll: true });
-      } else {
-        list.update({ ...channel, favorite: !channel.favorite });
-      }
-    } catch (error) {
-      fail(error);
-    }
-  },
+  }),
   onError: fail,
 });
 
@@ -112,7 +115,7 @@ const loadChannels = async ({ keepScroll = false } = {}): Promise<void> => {
   if (playlistId !== state.playlistId || selection !== state.selection || search !== state.search) return;
   list.setIds(ids, { showGroup: selection.kind !== 'group', keepScroll });
   ui.title.textContent = search ? `${selectionLabel(selection)} · “${search}”` : selectionLabel(selection);
-  ui.count.textContent = `${formatCount(ids.length)} channel${ids.length === 1 ? '' : 's'}`;
+  ui.count.textContent = plural(ids.length, 'channel');
   renderEmpty();
 };
 
@@ -138,7 +141,24 @@ const renderEmpty = (): void => {
   ui.empty.replaceChildren(...(reason === null ? [] : [reason]));
 };
 
+/** A selectable listbox option with a roving tabindex. */
+const listItem = (selected: boolean, extraClass: string, onActivate: () => void, ...children: Child[]): HTMLLIElement =>
+  h(
+    'li',
+    {
+      class: `list-item ${extraClass}${selected ? ' selected' : ''}`,
+      role: 'option',
+      'aria-selected': String(selected),
+      tabindex: selected ? 0 : -1,
+      onclick: onActivate,
+      onkeydown: (e: KeyboardEvent) => e.key === 'Enter' && onActivate(),
+    },
+    ...children,
+  );
+
 // ---------- groups ----------
+
+const selectionKey = (s: Selection): string => (s.kind === 'group' ? `group:${s.name}` : s.kind);
 
 const renderGroups = (): void => {
   if (state.playlistId === null) {
@@ -146,24 +166,15 @@ const renderGroups = (): void => {
     return;
   }
   const total = state.groups.reduce((sum, g) => sum + g.count, 0);
-  const item = (selection: Selection, label: string, count?: number, extraClass = '') => {
-    const selected =
-      selection.kind === state.selection.kind &&
-      (selection.kind !== 'group' || (state.selection.kind === 'group' && selection.name === state.selection.name));
-    return h(
-      'li',
-      {
-        class: `list-item${selected ? ' selected' : ''} ${extraClass}`,
-        role: 'option',
-        'aria-selected': String(selected),
-        tabindex: selected ? 0 : -1,
-        onclick: () => void selectGroup(selection),
-        onkeydown: (e: KeyboardEvent) => e.key === 'Enter' && void selectGroup(selection),
-      },
+  const current = selectionKey(state.selection);
+  const item = (selection: Selection, label: string, count?: number, extraClass = '') =>
+    listItem(
+      selectionKey(selection) === current,
+      extraClass,
+      () => void selectGroup(selection),
       h('span', { class: 'item-name', title: label }, label),
       count !== undefined && h('span', { class: 'item-count' }, formatCount(count)),
     );
-  };
   ui.groups.replaceChildren(
     item({ kind: 'all' }, 'All channels', total, 'special'),
     item({ kind: 'favorites' }, '★ Favorites', undefined, 'special'),
@@ -172,32 +183,21 @@ const renderGroups = (): void => {
   );
 };
 
-const selectGroup = async (selection: Selection): Promise<void> => {
+const selectGroup = guard(async (selection: Selection) => {
   state.selection = selection;
   renderGroups();
-  try {
-    await loadChannels();
-  } catch (error) {
-    fail(error);
-  }
-};
+  await loadChannels();
+});
 
 // ---------- playlists ----------
 
 const renderPlaylists = (): void => {
   ui.playlists.replaceChildren(
-    ...state.playlists.map((p) => {
-      const selected = p.id === state.playlistId;
-      return h(
-        'li',
-        {
-          class: `list-item playlist${selected ? ' selected' : ''}`,
-          role: 'option',
-          'aria-selected': String(selected),
-          tabindex: selected ? 0 : -1,
-          onclick: () => void selectPlaylist(p.id),
-          onkeydown: (e: KeyboardEvent) => e.key === 'Enter' && void selectPlaylist(p.id),
-        },
+    ...state.playlists.map((p) =>
+      listItem(
+        p.id === state.playlistId,
+        'playlist',
+        () => void selectPlaylist(p.id),
         h(
           'div',
           { class: 'playlist-text' },
@@ -205,7 +205,7 @@ const renderPlaylists = (): void => {
           h(
             'span',
             { class: 'item-meta', title: p.source },
-            `${formatCount(p.channelCount)} channels · ${p.sourceType === 'url' ? 'updated' : 'loaded'} ${timeAgo(p.lastRefreshedAt)}`,
+            `${plural(p.channelCount, 'channel')} · ${p.sourceType === 'url' ? 'updated' : 'loaded'} ${timeAgo(p.lastRefreshedAt)}`,
           ),
         ),
         h(
@@ -215,8 +215,8 @@ const renderPlaylists = (): void => {
           iconButton('✎', 'Rename', () => renamePlaylist(p)),
           iconButton('✕', 'Delete', () => deletePlaylist(p)),
         ),
-      );
-    }),
+      ),
+    ),
   );
 };
 
@@ -241,7 +241,7 @@ const loadPlaylists = async (): Promise<void> => {
   renderPlaylists();
 };
 
-const selectPlaylist = async (id: number | null): Promise<void> => {
+const selectPlaylist = guard(async (id: number | null) => {
   state.playlistId = id;
   state.selection = { kind: 'all' };
   state.groups = [];
@@ -253,14 +253,12 @@ const selectPlaylist = async (id: number | null): Promise<void> => {
     // Storage is a convenience only.
   }
   renderPlaylists();
-  try {
-    if (id !== null) state.groups = await ListGroups(id);
-    renderGroups();
-    await loadChannels();
-  } catch (error) {
-    fail(error);
-  }
-};
+  // Groups and channel IDs are independent full-playlist queries.
+  const [groups] = await Promise.all([id === null ? [] : ListGroups(id), loadChannels()]);
+  if (id !== state.playlistId) return; // the user moved on
+  state.groups = groups;
+  renderGroups();
+});
 
 /** Runs an import with progress in the status bar; one at a time. */
 const runImport = async (label: string, task: () => Promise<main.ImportResult>): Promise<main.ImportResult | null> => {
@@ -272,7 +270,7 @@ const runImport = async (label: string, task: () => Promise<main.ImportResult>):
   ui.add.disabled = true;
   ui.cancel.hidden = false;
   setStatus(`${label}…`);
-  const stop = EventsOn('import-progress', (n: number) => setStatus(`${label}… ${formatCount(n)} channels`));
+  const stop = EventsOn('import-progress', (n: number) => setStatus(`${label}… ${plural(n, 'channel')}`));
   try {
     return await task();
   } catch (error) {
@@ -288,7 +286,7 @@ const runImport = async (label: string, task: () => Promise<main.ImportResult>):
 };
 
 const describeImport = (r: main.ImportResult): string =>
-  `${formatCount(r.imported)} channels imported` +
+  `${plural(r.imported, 'channel')} imported` +
   (r.skipped ? ` · ${formatCount(r.skipped)} skipped (unsupported or unsafe stream URLs)` : '');
 
 const addPlaylist = async (): Promise<void> => {
@@ -344,7 +342,7 @@ const refreshPlaylist = async (p: main.Playlist, force = false): Promise<void> =
     const ok = await confirmDialog(
       'Refresh anyway?',
       `“${p.name}” was refreshed recently. Many providers block accounts that download the playlist too often. ` +
-        `It can be refreshed normally in about ${result.tooSoonMinutes} minute${result.tooSoonMinutes === 1 ? '' : 's'}.`,
+        `It can be refreshed normally in about ${plural(result.tooSoonMinutes, 'minute')}.`,
       'Refresh anyway',
       'danger',
     );
@@ -364,18 +362,14 @@ const refreshPlaylist = async (p: main.Playlist, force = false): Promise<void> =
   }
 };
 
-const renamePlaylist = async (p: main.Playlist): Promise<void> => {
+const renamePlaylist = guard(async (p: main.Playlist) => {
   const name = await promptDialog('Rename playlist', 'Name', p.name);
   if (!name || name === p.name) return;
-  try {
-    await RenamePlaylist(p.id, name);
-    await loadPlaylists();
-  } catch (error) {
-    fail(error);
-  }
-};
+  await RenamePlaylist(p.id, name);
+  await loadPlaylists();
+});
 
-const deletePlaylist = async (p: main.Playlist): Promise<void> => {
+const deletePlaylist = guard(async (p: main.Playlist) => {
   const ok = await confirmDialog(
     'Delete playlist?',
     `“${p.name}” and its favorites will be removed from this app. This cannot be undone.`,
@@ -383,15 +377,11 @@ const deletePlaylist = async (p: main.Playlist): Promise<void> => {
     'danger',
   );
   if (!ok) return;
-  try {
-    await DeletePlaylist(p.id);
-    await loadPlaylists();
-    if (state.playlistId === p.id) await selectPlaylist(state.playlists[0]?.id ?? null);
-    setStatus(`Deleted “${p.name}”`);
-  } catch (error) {
-    fail(error);
-  }
-};
+  await DeletePlaylist(p.id);
+  await loadPlaylists();
+  if (state.playlistId === p.id) await selectPlaylist(state.playlists[0]?.id ?? null);
+  setStatus(`Deleted “${p.name}”`);
+});
 
 // ---------- settings ----------
 
@@ -412,14 +402,10 @@ const openSettings = async (): Promise<void> => {
       : s.vlcError || 'VLC not found';
     reset.hidden = !s.vlcOverride;
   };
-  const updateVLC = async (action: () => Promise<main.Settings>) => {
-    try {
-      settings = await action();
-      renderVLC(settings);
-    } catch (error) {
-      fail(error);
-    }
-  };
+  const updateVLC = guard(async (action: () => Promise<main.Settings>) => {
+    settings = await action();
+    renderVLC(settings);
+  });
   reset.addEventListener('click', () => void updateVLC(ResetVLC));
   renderVLC(settings);
 
@@ -474,13 +460,7 @@ const openSettings = async (): Promise<void> => {
 
 // ---------- wiring ----------
 
-const onSearch = debounce(async () => {
-  try {
-    await loadChannels();
-  } catch (error) {
-    fail(error);
-  }
-}, 200);
+const onSearch = debounce(guard(() => loadChannels()), 200);
 
 ui.search.addEventListener('input', () => {
   state.search = ui.search.value.trim();

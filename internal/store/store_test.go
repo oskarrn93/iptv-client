@@ -113,9 +113,9 @@ func TestChannelsGroupsSearch(t *testing.T) {
 	ctx := context.Background()
 	s := openTest(t)
 	pid, _ := s.AddPlaylist(ctx, "p", SourceURL, "http://e/p.m3u")
-	n, err := s.ReplaceChannels(ctx, pid, "etag1", "lm1", feed(sample...))
-	if err != nil || n != 5 {
-		t.Fatalf("ReplaceChannels = %d, %v", n, err)
+	err := s.ReplaceChannels(ctx, pid, "etag1", "lm1", feed(sample...))
+	if err != nil {
+		t.Fatalf("ReplaceChannels: %v", err)
 	}
 	p, _ := s.GetPlaylist(ctx, pid)
 	if p.ChannelCount != 5 || p.ETag != "etag1" || p.LastModified != "lm1" || p.LastRefreshedAt.IsZero() {
@@ -171,11 +171,11 @@ func TestReplaceRollsBackOnError(t *testing.T) {
 	ctx := context.Background()
 	s := openTest(t)
 	pid, _ := s.AddPlaylist(ctx, "p", SourceURL, "http://e/p.m3u")
-	if _, err := s.ReplaceChannels(ctx, pid, "", "", feed(sample...)); err != nil {
+	if err := s.ReplaceChannels(ctx, pid, "", "", feed(sample...)); err != nil {
 		t.Fatal(err)
 	}
 	boom := errors.New("parse failed")
-	_, err := s.ReplaceChannels(ctx, pid, "new", "", func(insert func(ChannelInput) error) error {
+	err := s.ReplaceChannels(ctx, pid, "new", "", func(insert func(ChannelInput) error) error {
 		insert(ChannelInput{Name: "Half", URL: "http://x/h"})
 		return boom
 	})
@@ -191,7 +191,7 @@ func TestReplaceRollsBackOnError(t *testing.T) {
 	if p, _ := s.GetPlaylist(ctx, pid); p.ETag == "new" {
 		t.Error("etag updated despite rollback")
 	}
-	if _, err := s.ReplaceChannels(ctx, 12345, "", "", feed()); !errors.Is(err, ErrNotFound) {
+	if err := s.ReplaceChannels(ctx, 12345, "", "", feed()); !errors.Is(err, ErrNotFound) {
 		t.Errorf("replace on missing playlist err = %v", err)
 	}
 }
@@ -217,7 +217,7 @@ func TestFavoritesSurviveRefreshAndCredentialChange(t *testing.T) {
 	}
 	refreshed[0].Group = "UK Entertainment"
 	refreshed[0].Name = "  BBC  one hd " // whitespace/case changes are tolerated
-	if _, err := s.ReplaceChannels(ctx, pid, "", "", feed(refreshed...)); err != nil {
+	if err := s.ReplaceChannels(ctx, pid, "", "", feed(refreshed...)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -285,13 +285,6 @@ func TestSettings(t *testing.T) {
 	}
 }
 
-func TestChannelsByIDsLimit(t *testing.T) {
-	s := openTest(t)
-	if _, err := s.ChannelsByIDs(context.Background(), make([]int64, maxBatch+1)); err == nil {
-		t.Error("expected batch limit error")
-	}
-}
-
 // TestBulkInsert200k checks the critique's performance target: a 200k channel
 // playlist must import in well under the 5s budget.
 func TestBulkInsert200k(t *testing.T) {
@@ -317,10 +310,10 @@ func TestBulkInsert200k(t *testing.T) {
 		return nil
 	}
 	start := time.Now()
-	n, err := s.ReplaceChannels(ctx, pid, "", "", gen)
+	err := s.ReplaceChannels(ctx, pid, "", "", gen)
 	insertDur := time.Since(start)
-	if err != nil || n != total {
-		t.Fatalf("ReplaceChannels = %d, %v", n, err)
+	if err != nil {
+		t.Fatalf("ReplaceChannels: %v", err)
 	}
 
 	start = time.Now()
@@ -343,7 +336,7 @@ func TestBulkInsert200k(t *testing.T) {
 
 	// A refresh replaces existing rows, so it also pays for deleting them.
 	start = time.Now()
-	if _, err := s.ReplaceChannels(ctx, pid, "", "", gen); err != nil {
+	if err := s.ReplaceChannels(ctx, pid, "", "", gen); err != nil {
 		t.Fatal(err)
 	}
 	refreshDur := time.Since(start)

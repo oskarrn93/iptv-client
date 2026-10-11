@@ -46,9 +46,11 @@ func allChannels(t *testing.T, l *Library, pid int64) []store.Channel {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cs, err := l.Store.ChannelsByIDs(ctx, ids)
-	if err != nil {
-		t.Fatal(err)
+	cs := make([]store.Channel, len(ids))
+	for i, id := range ids {
+		if cs[i], err = l.Store.GetChannel(ctx, id); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return cs
 }

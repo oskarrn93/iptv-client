@@ -33,7 +33,7 @@ commands:
 `
 
 func main() {
-	defaultDB, _ := store.DefaultPath()
+	defaultDB, _ := store.ResolvePath()
 	dbPath := flag.String("db", defaultDB, "database file")
 	flag.Usage = func() { fmt.Fprint(os.Stderr, usage); flag.PrintDefaults() }
 	flag.Parse()
@@ -187,20 +187,17 @@ func printChannels(ctx context.Context, l *library.Library, f store.ChannelFilte
 	if err != nil {
 		return err
 	}
+	cs, err := l.Store.ChannelsByIDs(ctx, ids)
+	if err != nil {
+		return err
+	}
 	fmt.Fprintln(w, "ID\tFAV\tGROUP\tNAME")
-	for start := 0; start < len(ids); start += 500 {
-		end := min(start+500, len(ids))
-		cs, err := l.Store.ChannelsByIDs(ctx, ids[start:end])
-		if err != nil {
-			return err
+	for _, c := range cs {
+		fav := ""
+		if c.Favorite {
+			fav = "★"
 		}
-		for _, c := range cs {
-			fav := ""
-			if c.Favorite {
-				fav = "★"
-			}
-			fmt.Fprintf(w, "%d\t%s\t%s\t%s\n", c.ID, fav, c.Group, c.Name)
-		}
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\n", c.ID, fav, c.Group, c.Name)
 	}
 	return nil
 }

@@ -156,7 +156,8 @@ Playlist URLs (which often contain your provider username and password) are
 stored **unencrypted** in this file.
 
 Set `IPTV_CLIENT_DB` to a file path to use a different database, e.g. for
-testing with large playlists without touching your own data.
+testing with large playlists without touching your own data. The app and
+`iptv-debug` both honor it (`iptv-debug -db` still overrides it).
 
 ## CI and releases
 

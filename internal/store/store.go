@@ -36,6 +36,18 @@ func DefaultPath() (string, error) {
 	return filepath.Join(dir, AppDirName, "iptv.db"), nil
 }
 
+// PathEnv overrides the database location (development and testing).
+const PathEnv = "IPTV_CLIENT_DB"
+
+// ResolvePath returns the database location: $IPTV_CLIENT_DB if set,
+// otherwise DefaultPath.
+func ResolvePath() (string, error) {
+	if p := os.Getenv(PathEnv); p != "" {
+		return filepath.Abs(p)
+	}
+	return DefaultPath()
+}
+
 // Open opens (creating if needed) the database at path and applies migrations.
 func Open(ctx context.Context, path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -120,6 +132,8 @@ CREATE TRIGGER channels_ad AFTER DELETE ON channels BEGIN
 	INSERT INTO channels_fts(channels_fts, rowid, name, group_title) VALUES ('delete', old.id, old.name, old.group_title);
 END;
 `,
+	// 2: the delete trigger is per-row too; unindexChannels deletes in bulk.
+	`DROP TRIGGER channels_ad;`,
 }
 
 func (s *Store) migrate(ctx context.Context) error {

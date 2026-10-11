@@ -31,19 +31,16 @@ type Playlist struct {
 	CreatedAt       time.Time
 }
 
-// Channel is one playable entry.
+// Channel is one playable entry. ChannelsByIDs fills only the list fields
+// (ID, Name, Group, Favorite); GetChannel fills all of them.
 type Channel struct {
-	ID         int64
-	PlaylistID int64
-	Position   int
-	Name       string
-	URL        string
-	Group      string
-	TvgID      string
-	TvgName    string
-	TvgLogo    string
-	Options    map[string]string
-	Favorite   bool
+	ID       int64
+	Name     string
+	URL      string
+	Group    string
+	TvgID    string
+	Options  map[string]string
+	Favorite bool
 }
 
 // ChannelInput is a channel to insert during a refresh.
@@ -134,7 +131,28 @@ func (s *Store) RenamePlaylist(ctx context.Context, id int64, name string) error
 
 // DeletePlaylist removes a playlist with its channels and favorites.
 func (s *Store) DeletePlaylist(ctx context.Context, id int64) error {
-	return expectOne(s.db.ExecContext(ctx, `DELETE FROM playlists WHERE id = ?`, id))
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() // no-op after Commit
+	if err := unindexChannels(ctx, tx, id); err != nil {
+		return err
+	}
+	if err := expectOne(tx.ExecContext(ctx, `DELETE FROM playlists WHERE id = ?`, id)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// unindexChannels removes a playlist's channels from the search index in one
+// statement (a per-row delete trigger costs as much as the insert trigger
+// did). It must run before the channels are deleted: an external-content
+// FTS5 delete needs the indexed values.
+func unindexChannels(ctx context.Context, tx *sql.Tx, playlistID int64) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO channels_fts(channels_fts, rowid, name, group_title)
+		SELECT 'delete', id, name, group_title FROM channels WHERE playlist_id = ?`, playlistID)
+	return err
 }
 
 // MarkNotModified records a successful refresh that returned no new data.
@@ -147,23 +165,26 @@ func (s *Store) MarkNotModified(ctx context.Context, id int64) error {
 // produce returns an error the transaction is rolled back and the previous
 // channels remain. etag/lastModified are stored with the new data.
 func (s *Store) ReplaceChannels(ctx context.Context, playlistID int64, etag, lastModified string,
-	produce func(insert func(ChannelInput) error) error) (int, error) {
+	produce func(insert func(ChannelInput) error) error) error {
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	defer tx.Rollback() // no-op after Commit
 
 	var exists int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM playlists WHERE id = ?`, playlistID).Scan(&exists); err != nil {
-		return 0, err
+		return err
 	}
 	if exists == 0 {
-		return 0, fmt.Errorf("playlist %d: %w", playlistID, ErrNotFound)
+		return fmt.Errorf("playlist %d: %w", playlistID, ErrNotFound)
+	}
+	if err := unindexChannels(ctx, tx, playlistID); err != nil {
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM channels WHERE playlist_id = ?`, playlistID); err != nil {
-		return 0, err
+		return err
 	}
 	// Rows are buffered and written insertBatch at a time with one multi-row
 	// INSERT, which is much faster than a statement per row.
@@ -176,7 +197,7 @@ func (s *Store) ReplaceChannels(ctx context.Context, playlistID int64, etag, las
 	}
 	full, err := tx.PrepareContext(ctx, insertSQL(insertBatch))
 	if err != nil {
-		return 0, err
+		return err
 	}
 	defer full.Close()
 
@@ -215,21 +236,21 @@ func (s *Store) ReplaceChannels(ctx context.Context, playlistID int64, etag, las
 		return nil
 	}
 	if err := produce(insert); err != nil {
-		return 0, err
+		return err
 	}
 	if err := flush(); err != nil {
-		return 0, err
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO channels_fts(rowid, name, group_title)
 		SELECT id, name, group_title FROM channels WHERE playlist_id = ?`, playlistID); err != nil {
-		return 0, err
+		return err
 	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE playlists SET channel_count = ?, etag = ?, last_modified = ?, last_refreshed_at = ? WHERE id = ?`,
 		n, etag, lastModified, time.Now().Unix(), playlistID); err != nil {
-		return 0, err
+		return err
 	}
-	return n, tx.Commit()
+	return tx.Commit()
 }
 
 // --- channels ---
@@ -268,7 +289,7 @@ func (s *Store) ChannelIDs(ctx context.Context, f ChannelFilter) ([]int64, error
 		args = append(args, *f.Group)
 	}
 	if f.FavoritesOnly {
-		where = append(where, "EXISTS (SELECT 1 FROM favorites fv WHERE fv.playlist_id = c.playlist_id AND fv.fav_key = c.fav_key)")
+		where = append(where, isFavorite)
 	}
 	if q := ftsQuery(f.Query); q != "" {
 		from = "channels_fts JOIN channels c ON c.id = channels_fts.rowid"
@@ -296,26 +317,23 @@ func (s *Store) ChannelIDs(ctx context.Context, f ChannelFilter) ([]int64, error
 // well under SQLite's 32766 bound-variable limit).
 const insertBatch = 200
 
-// maxBatch bounds ChannelsByIDs to stay under SQLite's variable limit.
-const maxBatch = 500
+// isFavorite is an SQL condition on channel c.
+const isFavorite = `EXISTS (SELECT 1 FROM favorites fv WHERE fv.playlist_id = c.playlist_id AND fv.fav_key = c.fav_key)`
 
-// ChannelsByIDs returns the channels with the given IDs, in the order given.
-// Unknown IDs are skipped.
+// ChannelsByIDs returns the list fields of the channels with the given IDs,
+// in the order given. Unknown IDs are skipped. The IDs are bound as one JSON
+// array, so there is no limit on how many can be requested.
 func (s *Store) ChannelsByIDs(ctx context.Context, ids []int64) ([]Channel, error) {
 	if len(ids) == 0 {
 		return []Channel{}, nil
 	}
-	if len(ids) > maxBatch {
-		return nil, fmt.Errorf("at most %d ids per request", maxBatch)
-	}
-	args := make([]any, len(ids))
-	for i, id := range ids {
-		args[i] = id
+	idList, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT c.id, c.playlist_id, c.position, c.name, c.url, c.group_title, c.tvg_id, c.tvg_name, c.tvg_logo, c.vlc_opts,
-		       EXISTS (SELECT 1 FROM favorites fv WHERE fv.playlist_id = c.playlist_id AND fv.fav_key = c.fav_key)
-		FROM channels c WHERE c.id IN (?`+strings.Repeat(",?", len(ids)-1)+`)`, args...)
+		SELECT c.id, c.name, c.group_title, `+isFavorite+`
+		FROM channels c WHERE c.id IN (SELECT value FROM json_each(?))`, string(idList))
 	if err != nil {
 		return nil, err
 	}
@@ -323,12 +341,8 @@ func (s *Store) ChannelsByIDs(ctx context.Context, ids []int64) ([]Channel, erro
 	byID := make(map[int64]Channel, len(ids))
 	for rows.Next() {
 		var c Channel
-		var opts string
-		if err := rows.Scan(&c.ID, &c.PlaylistID, &c.Position, &c.Name, &c.URL, &c.Group, &c.TvgID, &c.TvgName, &c.TvgLogo, &opts, &c.Favorite); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Group, &c.Favorite); err != nil {
 			return nil, err
-		}
-		if err := json.Unmarshal([]byte(opts), &c.Options); err != nil {
-			return nil, fmt.Errorf("channel %d options: %w", c.ID, err)
 		}
 		byID[c.ID] = c
 	}
@@ -344,16 +358,23 @@ func (s *Store) ChannelsByIDs(ctx context.Context, ids []int64) ([]Channel, erro
 	return out, nil
 }
 
-// GetChannel returns one channel.
+// GetChannel returns one channel with all its fields.
 func (s *Store) GetChannel(ctx context.Context, id int64) (Channel, error) {
-	cs, err := s.ChannelsByIDs(ctx, []int64{id})
+	c := Channel{ID: id}
+	var opts string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT c.name, c.url, c.group_title, c.tvg_id, c.vlc_opts, `+isFavorite+`
+		FROM channels c WHERE c.id = ?`, id).Scan(&c.Name, &c.URL, &c.Group, &c.TvgID, &opts, &c.Favorite)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Channel{}, fmt.Errorf("channel %d: %w", id, ErrNotFound)
+	}
 	if err != nil {
 		return Channel{}, err
 	}
-	if len(cs) == 0 {
-		return Channel{}, fmt.Errorf("channel %d: %w", id, ErrNotFound)
+	if err := json.Unmarshal([]byte(opts), &c.Options); err != nil {
+		return Channel{}, fmt.Errorf("channel %d options: %w", id, err)
 	}
-	return cs[0], nil
+	return c, nil
 }
 
 // ftsQuery turns user input into a safe FTS5 prefix query: every word is
