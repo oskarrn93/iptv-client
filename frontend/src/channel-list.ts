@@ -218,7 +218,15 @@ export class ChannelList {
       if (top < scrollTop) this.element.scrollTop = top;
       else if (top + ROW_HEIGHT > scrollTop + clientHeight) this.element.scrollTop = top + ROW_HEIGHT - clientHeight;
     }
-    this.#redraw();
+    // Restyle the existing rows rather than rebuilding them: selection
+    // happens on mousedown, and replacing the pressed button before mouseup
+    // makes the browser drop the click (and dblclick).
+    for (const row of this.#spacer.children as HTMLCollectionOf<HTMLElement>) {
+      const selected = Number(row.dataset.index) === this.#selected;
+      row.classList.toggle('selected', selected);
+      row.setAttribute('aria-selected', String(selected));
+    }
+    this.#schedule(); // only rebuilds if scrolling changed the visible range
   }
 
   #onKey(e: KeyboardEvent): void {

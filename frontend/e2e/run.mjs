@@ -128,6 +128,23 @@ try {
   check('status names the player', status.endsWith('in VLC'), status);
   check('arrow key moved past the first result', !selected.startsWith('Kanal 4999 '), selected);
 
+  // A human click on an unselected row's buttons: mousedown selects the row,
+  // and mouseup lands frames later. The button must survive in between.
+  await page.hover('.channel-row[data-index="3"] .channel-name');
+  await page.click('.channel-row[data-index="3"] .play', { delay: 100, timeout: 5000 });
+  await waitFor(() => window.__calls.filter(([m]) => m === 'Play').length === 2);
+  check('Play button works on an unselected row', true);
+  await page.hover('.channel-row[data-index="4"] .channel-name');
+  await page.click('.channel-row[data-index="4"] .star', { delay: 100, timeout: 5000 });
+  await page.waitForSelector('.channel-row[data-index="4"] .star.on', { timeout: 5000 });
+  check('star button works on an unselected row', true);
+  await page.click('.channel-row[data-index="4"] .star', { delay: 100, timeout: 5000 });
+  await page.waitForSelector('.channel-row[data-index="4"] .star:not(.on)', { timeout: 5000 });
+  // Back to the keyboard-selected row for the copy checks below.
+  await page.focus('#channels');
+  await page.keyboard.press('Home');
+  await page.keyboard.press('ArrowDown');
+
   // Copy the stream URL: Ctrl+C on the selection, or from the context menu.
   const copies = () => page.evaluate(() => window.__calls.filter(([m]) => m === 'CopyStreamURL').map(([, id]) => id));
   await page.keyboard.press('Control+c');
@@ -160,8 +177,8 @@ try {
   check('clicking elsewhere closes the menu', true);
 
   // Double-click plays too.
-  await page.dblclick('.channel-row:nth-child(1) .channel-name');
-  await waitFor(() => window.__calls.filter(([m]) => m === 'Play').length === 2);
+  await page.dblclick('.channel-row:nth-child(3) .channel-name', { delay: 50 });
+  await waitFor(() => window.__calls.filter(([m]) => m === 'Play').length === 3);
   check('double-click plays', true);
 
   // Escape clears search.
