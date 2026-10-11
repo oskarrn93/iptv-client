@@ -169,6 +169,14 @@ testing with large playlists without touching your own data.
 - **Tags `v*` (or manual run):** additionally a macOS universal build,
   ad-hoc signed, and a GitHub Release with both zips.
 
+`.github/dependabot.yml` opens weekly PRs for Go modules, frontend npm
+packages and GitHub Actions. Minor/patch bumps are grouped into one PR per
+ecosystem, majors come separately. Merge once CI is green. A Wails bump can
+change the generated bindings: if the "bindings are committed" check fails,
+run `go tool wails build` locally and commit the updated `frontend/wailsjs`
+to the PR. Security alerts and security-update PRs must be switched on in the
+repo under **Settings → Code security** (the config file can't enable them).
+
 ### Making a release
 
 1. Set the new version in `wails.json` → `info.productVersion` (e.g. `0.2.0`)

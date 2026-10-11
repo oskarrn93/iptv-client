@@ -1,0 +1,30 @@
+version: 2
+
+# Minor and patch bumps are grouped into one PR per ecosystem to keep the
+# noise down; major bumps still get their own PR so breaking changes are
+# reviewed individually. Security updates are not grouped and arrive as soon
+# as an advisory is published.
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    groups:
+      npm:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        update-types: [minor, patch]
