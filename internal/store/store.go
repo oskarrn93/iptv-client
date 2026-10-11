@@ -5,6 +5,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"errors"
 	"fmt"
 	"net/url"
@@ -12,6 +13,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/sqlite"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	_ "modernc.org/sqlite" // pure-Go SQLite driver (no CGO)
 )
 
@@ -73,95 +77,69 @@ func Open(ctx context.Context, path string) (*Store, error) {
 // Close closes the database.
 func (s *Store) Close() error { return s.db.Close() }
 
-// migrations are applied in order; never edit one that has shipped.
-var migrations = []string{
-	// 1: initial schema
-	`
-CREATE TABLE playlists (
-	id                INTEGER PRIMARY KEY,
-	name              TEXT    NOT NULL,
-	source_type       TEXT    NOT NULL CHECK (source_type IN ('url', 'file')),
-	source            TEXT    NOT NULL,
-	etag              TEXT    NOT NULL DEFAULT '',
-	last_modified     TEXT    NOT NULL DEFAULT '',
-	last_refreshed_at INTEGER NOT NULL DEFAULT 0,
-	channel_count     INTEGER NOT NULL DEFAULT 0,
-	created_at        INTEGER NOT NULL
-);
-
-CREATE TABLE channels (
-	id          INTEGER PRIMARY KEY,
-	playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
-	position    INTEGER NOT NULL,
-	name        TEXT    NOT NULL,
-	url         TEXT    NOT NULL,
-	group_title TEXT    NOT NULL DEFAULT '',
-	tvg_id      TEXT    NOT NULL DEFAULT '',
-	tvg_name    TEXT    NOT NULL DEFAULT '',
-	tvg_logo    TEXT    NOT NULL DEFAULT '',
-	vlc_opts    TEXT    NOT NULL DEFAULT '{}',
-	fav_key     TEXT    NOT NULL
-);
-CREATE INDEX channels_by_position ON channels(playlist_id, position);
-CREATE INDEX channels_by_group    ON channels(playlist_id, group_title, position);
-CREATE INDEX channels_by_fav_key  ON channels(playlist_id, fav_key);
-
--- Favorites reference channels by a key that survives refreshes and
--- credential changes in stream URLs (see favKey).
-CREATE TABLE favorites (
-	playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
-	fav_key     TEXT    NOT NULL,
-	created_at  INTEGER NOT NULL,
-	PRIMARY KEY (playlist_id, fav_key)
-);
-
-CREATE TABLE settings (
-	key   TEXT PRIMARY KEY,
-	value TEXT NOT NULL
-);
-
-CREATE VIRTUAL TABLE channels_fts USING fts5(
-	name, group_title,
-	content = 'channels', content_rowid = 'id',
-	tokenize = 'unicode61 remove_diacritics 2'
-);
--- No insert trigger: per-row FTS inserts force an index flush per statement
--- and made 200k-channel imports ~2x slower. ReplaceChannels indexes new rows
--- in one INSERT ... SELECT instead. Deletes (incl. cascades) use a trigger.
-CREATE TRIGGER channels_ad AFTER DELETE ON channels BEGIN
-	INSERT INTO channels_fts(channels_fts, rowid, name, group_title) VALUES ('delete', old.id, old.name, old.group_title);
-END;
-`,
-	// 2: the delete trigger is per-row too; unindexChannels deletes in bulk.
-	`DROP TRIGGER channels_ad;`,
-}
+// migrationFiles holds the schema migrations in golang-migrate's
+// NNNNNN_name.{up,down}.sql layout. Never edit one that has shipped.
+//
+//go:embed migrations/*.sql
+var migrationFiles embed.FS
 
 func (s *Store) migrate(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)`); err != nil {
+	if err := s.upgradeLegacyVersionTable(ctx); err != nil {
 		return err
 	}
-	var current int
-	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&current); err != nil {
+	src, err := iofs.New(migrationFiles, "migrations")
+	if err != nil {
 		return err
 	}
-	for i := current; i < len(migrations); i++ {
-		tx, err := s.db.BeginTx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, migrations[i]); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("migration %d: %w", i+1, err)
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations(version) VALUES (?)`, i+1); err != nil {
-			tx.Rollback()
-			return err
-		}
-		if err := tx.Commit(); err != nil {
-			return err
-		}
+	drv, err := sqlite.WithInstance(s.db, &sqlite.Config{})
+	if err != nil {
+		return err
+	}
+	// Not m.Close(): that would close s.db, which the Store still owns.
+	m, err := migrate.NewWithInstance("iofs", src, "sqlite", drv)
+	if err != nil {
+		return err
+	}
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		return err
 	}
 	return nil
+}
+
+// upgradeLegacyVersionTable converts the schema_migrations table written by
+// the pre-golang-migrate migrator (version only, one row per migration) to
+// golang-migrate's format (a single version + dirty row), keeping the
+// applied version so existing databases aren't migrated twice.
+func (s *Store) upgradeLegacyVersionTable(ctx context.Context) error {
+	var legacy bool
+	err := s.db.QueryRowContext(ctx, `
+SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations')
+   AND NOT EXISTS (SELECT 1 FROM pragma_table_info('schema_migrations') WHERE name = 'dirty')`).Scan(&legacy)
+	if err != nil || !legacy {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var version int
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&version); err != nil {
+		return err
+	}
+	// Same table definition golang-migrate's sqlite driver creates.
+	if _, err := tx.ExecContext(ctx, `
+DROP TABLE schema_migrations;
+CREATE TABLE schema_migrations (version uint64, dirty bool);
+CREATE UNIQUE INDEX version_unique ON schema_migrations (version);`); err != nil {
+		return err
+	}
+	if version > 0 {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, dirty) VALUES (?, false)`, version); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // favKey identifies a channel for favorites. It deliberately excludes the

@@ -8,6 +8,10 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/sqlite"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 )
 
 func openTest(t testing.TB) *Store {
@@ -65,6 +69,59 @@ func TestMigrateIsIdempotent(t *testing.T) {
 			t.Fatal(err)
 		}
 		s.Close()
+	}
+}
+
+func TestMigrateUpgradesLegacyVersionTable(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "x.db")
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Rewrite the version table as the pre-golang-migrate migrator left it.
+	if _, err := s.db.ExecContext(ctx, `
+DROP TABLE schema_migrations;
+CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY);
+INSERT INTO schema_migrations(version) VALUES (1), (2);`); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+
+	s, err = Open(ctx, path) // would fail re-creating tables if versions were lost
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var version int
+	var dirty bool
+	if err := s.db.QueryRowContext(ctx, `SELECT version, dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil {
+		t.Fatal(err)
+	}
+	if version != 2 || dirty {
+		t.Fatalf("got version %d dirty %v, want 2 false", version, dirty)
+	}
+}
+
+func TestMigrationsDownAndUp(t *testing.T) {
+	s := openTest(t)
+	src, err := iofs.New(migrationFiles, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	drv, err := sqlite.WithInstance(s.db, &sqlite.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := migrate.NewWithInstance("iofs", src, "sqlite", drv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Down(); err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	if err := m.Up(); err != nil {
+		t.Fatalf("up after down: %v", err)
 	}
 }
 

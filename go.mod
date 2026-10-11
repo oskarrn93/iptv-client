@@ -3,6 +3,7 @@ module iptv-client
 go 1.26.0
 
 require (
+	github.com/golang-migrate/migrate/v4 v4.20.1
 	github.com/wailsapp/wails/v2 v2.16.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/text v0.43.0
