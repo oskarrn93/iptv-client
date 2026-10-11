@@ -133,7 +133,7 @@ forbids evaluating strings, so the tests use their own `waitFor` helper instead.
 
 ### Debug CLI
 
-`cmd/iptv-debug` drives the same core library as the GUI. It is a dev tool
+`cmd/iptv-debug` drives the same services as the GUI. It is a dev tool
 only and is not shipped. Use `-db` to keep experiments out of your real
 database:
 

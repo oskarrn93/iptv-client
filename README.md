@@ -40,10 +40,11 @@ main.go, app.go        Wails entry point and GUI bindings
 frontend/              UI (Vite + TypeScript, no framework)
 frontend/e2e           UI tests against a stubbed backend
 internal/m3u           streaming playlist parser
-internal/store         SQLite storage, search, favorites
+internal/model         entities shared by repository and service
+internal/repository    SQLite repositories (one per table), migrations, transactions
 internal/fetch         playlist download (size cap, ETag, credential-safe errors)
 internal/player        VLC discovery, URL/option allowlists, launch
-internal/library       service used by GUI and CLI (import, refresh, play)
+internal/service       business logic used by GUI and CLI (import, refresh, play)
 cmd/iptv-debug         developer CLI (not shipped)
 docs/SETUP.md          developer setup — start here
 ```

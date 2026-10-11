@@ -1,6 +1,12 @@
-// Package store persists playlists, channels, favorites and settings in a
-// local SQLite database.
-package store
+// Package repository persists playlists, channels, favorites and settings in
+// a local SQLite database. There is one repository per table; each runs its
+// statements either directly on the database or inside a transaction
+// started with Database.InTx.
+//
+// Every SQL statement is written out in full as a string literal. Queries
+// are never assembled by concatenation, even when that means repeating
+// near-identical statements.
+package repository
 
 import (
 	"context"
@@ -11,7 +17,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/sqlite"
@@ -26,9 +31,37 @@ const AppDirName = "IPTVClient"
 // ErrNotFound is returned when a requested row does not exist.
 var ErrNotFound = errors.New("not found")
 
-// Store wraps the SQLite database.
-type Store struct {
-	db *sql.DB
+// Querier is what the repositories need to run statements. Both *sql.DB and
+// *sql.Tx implement it.
+type Querier interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	PrepareContext(ctx context.Context, query string) (*sql.Stmt, error)
+}
+
+// Repositories groups the repositories that share one Querier.
+type Repositories struct {
+	Playlists *PlaylistRepository
+	Channels  *ChannelRepository
+	Favorites *FavoriteRepository
+	Settings  *SettingRepository
+}
+
+func newRepositories(q Querier) Repositories {
+	return Repositories{
+		Playlists: &PlaylistRepository{q: q},
+		Channels:  &ChannelRepository{q: q},
+		Favorites: &FavoriteRepository{q: q},
+		Settings:  &SettingRepository{q: q},
+	}
+}
+
+// Database owns the SQLite connection. Its embedded repositories run each
+// statement on its own; use InTx to group statements atomically.
+type Database struct {
+	Repositories
+	conn *sql.DB
 }
 
 // DefaultPath returns the default database location for this OS user.
@@ -53,7 +86,7 @@ func ResolvePath() (string, error) {
 }
 
 // Open opens (creating if needed) the database at path and applies migrations.
-func Open(ctx context.Context, path string) (*Store, error) {
+func Open(ctx context.Context, path string) (*Database, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
@@ -62,20 +95,34 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		q.Add("_pragma", p)
 	}
 	dsn := "file:" + filepath.ToSlash(path) + "?" + q.Encode()
-	db, err := sql.Open("sqlite", dsn)
+	conn, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{db: db}
-	if err := s.migrate(ctx); err != nil {
-		db.Close()
+	d := &Database{Repositories: newRepositories(conn), conn: conn}
+	if err := d.migrate(ctx); err != nil {
+		conn.Close()
 		return nil, fmt.Errorf("migrating database: %w", err)
 	}
-	return s, nil
+	return d, nil
 }
 
 // Close closes the database.
-func (s *Store) Close() error { return s.db.Close() }
+func (d *Database) Close() error { return d.conn.Close() }
+
+// InTx runs fn with repositories bound to one transaction. The transaction
+// is committed if fn returns nil and rolled back otherwise.
+func (d *Database) InTx(ctx context.Context, fn func(tx Repositories) error) error {
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() // no-op after Commit
+	if err := fn(newRepositories(tx)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
 // migrationFiles holds the schema migrations in golang-migrate's
 // NNNNNN_name.{up,down}.sql layout. Never edit one that has shipped.
@@ -83,19 +130,19 @@ func (s *Store) Close() error { return s.db.Close() }
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-func (s *Store) migrate(ctx context.Context) error {
-	if err := s.upgradeLegacyVersionTable(ctx); err != nil {
+func (d *Database) migrate(ctx context.Context) error {
+	if err := d.upgradeLegacyVersionTable(ctx); err != nil {
 		return err
 	}
 	src, err := iofs.New(migrationFiles, "migrations")
 	if err != nil {
 		return err
 	}
-	drv, err := sqlite.WithInstance(s.db, &sqlite.Config{})
+	drv, err := sqlite.WithInstance(d.conn, &sqlite.Config{})
 	if err != nil {
 		return err
 	}
-	// Not m.Close(): that would close s.db, which the Store still owns.
+	// Not m.Close(): that would close d.conn, which the Database still owns.
 	m, err := migrate.NewWithInstance("iofs", src, "sqlite", drv)
 	if err != nil {
 		return err
@@ -110,15 +157,15 @@ func (s *Store) migrate(ctx context.Context) error {
 // the pre-golang-migrate migrator (version only, one row per migration) to
 // golang-migrate's format (a single version + dirty row), keeping the
 // applied version so existing databases aren't migrated twice.
-func (s *Store) upgradeLegacyVersionTable(ctx context.Context) error {
+func (d *Database) upgradeLegacyVersionTable(ctx context.Context) error {
 	var legacy bool
-	err := s.db.QueryRowContext(ctx, `
+	err := d.conn.QueryRowContext(ctx, `
 SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations')
    AND NOT EXISTS (SELECT 1 FROM pragma_table_info('schema_migrations') WHERE name = 'dirty')`).Scan(&legacy)
 	if err != nil || !legacy {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -142,10 +189,17 @@ CREATE UNIQUE INDEX version_unique ON schema_migrations (version);`); err != nil
 	return tx.Commit()
 }
 
-// favKey identifies a channel for favorites. It deliberately excludes the
-// URL (which often embeds account credentials that change) and the group
-// (which providers reshuffle). tvg-id alone is not enough because HD/SD
-// variants usually share one, so the name is included.
-func favKey(tvgID, name string) string {
-	return strings.ToLower(strings.TrimSpace(tvgID)) + "\x1f" + strings.ToLower(strings.Join(strings.Fields(name), " "))
+// expectOne turns "no rows affected" into ErrNotFound.
+func expectOne(res sql.Result, err error) error {
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
