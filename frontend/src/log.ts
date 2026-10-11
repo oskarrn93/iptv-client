@@ -1,22 +1,13 @@
 // Frontend logging. Lines go to the app's log file through Go (App.Log),
 // tagged component=ui, where they are validated, size-limited, redacted and
-// rate-limited. Like Go code, log IDs, never channel or playlist names or
-// URLs.
+// rate-limited, and dropped below the log level. Like Go code, log IDs,
+// never channel or playlist names or URLs.
 
 import { Log } from '../wailsjs/go/main/App';
 
 export type Level = 'debug' | 'info' | 'warn' | 'error';
 
-const order: Record<Level, number> = { debug: 0, info: 1, warn: 2, error: 3 };
-let threshold: Level = 'info';
-
-/** Sets the level below which lines are not sent to Go at all. */
-export const setLogLevel = (level: string): void => {
-  if (level in order) threshold = level as Level;
-};
-
 const send = (level: Level, msg: string, attrs: Record<string, unknown> = {}): void => {
-  if (order[level] < order[threshold]) return;
   const values: Record<string, string> = {};
   for (const [k, v] of Object.entries(attrs)) {
     if (v !== undefined && v !== null) values[k] = String(v);

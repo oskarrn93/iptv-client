@@ -93,8 +93,7 @@ func (a *App) startup(ctx context.Context) {
 
 // started applies the saved log level and logs the player in use.
 func (a *App) started(ctx context.Context) {
-	if name, err := a.svc.settings.LogLevel(ctx); err == nil {
-		level, _ := logging.ParseLevel(name)
+	if level, err := a.svc.settings.LogLevel(ctx); err == nil {
 		a.logLevel.Set(level)
 	}
 	a.log.InfoContext(ctx, "database open", "log_level", logging.LevelName(a.logLevel.Level()))
@@ -459,6 +458,12 @@ func (a *App) GetSettings() (_ Settings, err error) {
 	if err != nil {
 		return Settings{}, err
 	}
+	return a.settings(ctx, svc)
+}
+
+// settings builds the Settings DTO. Bound methods use it rather than
+// calling GetSettings, which would log a failure twice under another op.
+func (a *App) settings(ctx context.Context, svc *services) (Settings, error) {
 	ls, err := svc.settings.Get(ctx)
 	if err != nil {
 		return Settings{}, err
@@ -501,7 +506,7 @@ func (a *App) ChoosePlayer() (_ Settings, err error) {
 			return Settings{}, err
 		}
 	}
-	s, err := a.GetSettings()
+	s, err := a.settings(ctx, svc)
 	if err == nil && path != "" {
 		a.log.InfoContext(ctx, "player chosen", "name", s.PlayerName)
 	}
@@ -520,7 +525,7 @@ func (a *App) ResetPlayer() (_ Settings, err error) {
 		return Settings{}, err
 	}
 	a.log.InfoContext(ctx, "player reset to auto-detect")
-	return a.GetSettings()
+	return a.settings(ctx, svc)
 }
 
 // SetUserAgent sets the User-Agent for playlist downloads ("" = default).

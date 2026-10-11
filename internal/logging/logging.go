@@ -18,7 +18,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	"iptv-client/internal/database"
 	"iptv-client/internal/redact"
@@ -59,11 +58,9 @@ func Setup(dir string, m Meta) (*Logs, error) {
 	var out io.Writer = os.Stderr
 	err := os.MkdirAll(dir, 0o700)
 	if err == nil {
-		l.w = newRotator(dir, m)
-		if err = l.w.open(); err == nil {
-			out = l.w
-		} else {
-			l.w = nil
+		w := newRotator(dir, m)
+		if err = w.open(); err == nil {
+			l.w, out = w, w
 		}
 	}
 	l.Logger = slog.New(newHandler(out, l.Level)).With("run", m.Run)
@@ -93,12 +90,12 @@ func (l *Logs) Close() error {
 // ~/Library/Logs/IPTVClient on macOS and %LocalAppData%\IPTVClient\logs on
 // Windows.
 func Dir() (string, error) {
-	if p := os.Getenv(database.PathEnv); p != "" {
-		abs, err := filepath.Abs(p)
+	if os.Getenv(database.PathEnv) != "" {
+		db, err := database.ResolvePath()
 		if err != nil {
 			return "", err
 		}
-		return filepath.Join(filepath.Dir(abs), "logs"), nil
+		return filepath.Join(filepath.Dir(db), "logs"), nil
 	}
 	if runtime.GOOS == "darwin" {
 		home, err := os.UserHomeDir()
@@ -188,7 +185,10 @@ func (h handler) WithGroup(name string) slog.Handler {
 
 // redactAttr runs on the message and every attribute, including those from
 // With, Logger.With and the context.
-func redactAttr(_ []string, a slog.Attr) slog.Attr {
+func redactAttr(groups []string, a slog.Attr) slog.Attr {
+	if len(groups) == 0 && a.Key == slog.LevelKey {
+		return a // a slog.Level; nothing to redact
+	}
 	switch a.Value.Kind() {
 	case slog.KindString:
 		a.Value = slog.StringValue(redact.String(a.Value.String()))
@@ -205,6 +205,3 @@ func redactAttr(_ []string, a slog.Attr) slog.Attr {
 	}
 	return a
 }
-
-// trimNewline removes one trailing newline (Wails messages end in one).
-func trimNewline(s string) string { return strings.TrimSuffix(s, "\n") }

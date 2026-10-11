@@ -23,11 +23,11 @@ func OpenFolder(dir string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
-		windir := os.Getenv("WINDIR")
-		if windir == "" {
-			windir = `C:\Windows`
+		root := os.Getenv("SystemRoot")
+		if root == "" {
+			root = `C:\Windows`
 		}
-		cmd = exec.Command(filepath.Join(windir, "explorer.exe"), dir)
+		cmd = exec.Command(filepath.Join(root, "explorer.exe"), dir)
 	case "darwin":
 		cmd = exec.Command("/usr/bin/open", dir)
 	default:

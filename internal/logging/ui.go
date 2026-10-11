@@ -14,12 +14,10 @@ import (
 // Limits on what the frontend may log. The UI renders untrusted playlist
 // text, so its log calls are treated as untrusted input too.
 const (
-	uiMaxMsg      = 2 << 10
-	uiMaxValue    = 2 << 10
-	uiMaxStack    = 8 << 10
-	uiMaxAttrs    = 16
-	uiComponent   = "ui"
-	uiDroppedLine = "ui log lines dropped"
+	uiMaxMsg   = 2 << 10
+	uiMaxValue = 2 << 10
+	uiMaxStack = 8 << 10
+	uiMaxAttrs = 16
 )
 
 // Rate limit for frontend lines and for Wails' messages (which scripts in
@@ -47,7 +45,7 @@ type UI struct {
 
 // NewUI returns a frontend logger writing to l.
 func NewUI(l *slog.Logger) *UI {
-	return &UI{l: l.With("component", uiComponent), limit: newLimiter()}
+	return &UI{l: l.With("component", "ui"), limit: newLimiter()}
 }
 
 // Log writes one frontend line. Invalid levels are ignored, invalid or
@@ -58,14 +56,7 @@ func (u *UI) Log(level, msg string, attrs map[string]string) {
 		return
 	}
 	ctx := context.Background()
-	if !u.l.Enabled(ctx, lvl) {
-		return
-	}
-	dropped, ok := u.limit.take()
-	if dropped > 0 {
-		u.l.Warn(uiDroppedLine, "n", dropped)
-	}
-	if !ok {
+	if !u.limit.admit(ctx, u.l, lvl, "ui log lines dropped") {
 		return
 	}
 	keys := make([]string, 0, len(attrs))
@@ -119,6 +110,20 @@ func (r *limiter) take() (dropped int, ok bool) {
 	r.tokens--
 	dropped, r.dropped = r.dropped, 0
 	return dropped, true
+}
+
+// admit reports whether a line at lvl should be written to l: it is enabled
+// and within the rate. When lines flow again after some were dropped, it
+// first logs how many, with droppedMsg.
+func (r *limiter) admit(ctx context.Context, l *slog.Logger, lvl slog.Level, droppedMsg string) bool {
+	if !l.Enabled(ctx, lvl) {
+		return false
+	}
+	dropped, ok := r.take()
+	if dropped > 0 {
+		l.WarnContext(ctx, droppedMsg, "n", dropped)
+	}
+	return ok
 }
 
 // truncate cuts s to at most n bytes without splitting a UTF-8 sequence.

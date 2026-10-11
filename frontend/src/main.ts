@@ -27,7 +27,7 @@ import { EventsOn } from '../wailsjs/runtime/runtime';
 import { ChannelList } from './channel-list';
 import { confirmDialog, promptDialog, showDialog } from './dialogs';
 import { $, type Child, debounce, errorMessage, formatCount, h, plural, timeAgo } from './dom';
-import { installErrorHandlers, setLogLevel } from './log';
+import { installErrorHandlers, type Level } from './log';
 import { showMenu } from './menu';
 
 installErrorHandlers();
@@ -482,7 +482,6 @@ const openSettings = async (): Promise<void> => {
     );
     return;
   }
-  setLogLevel(settings.logLevel);
   const playerStatus = h('p', { class: 'player-status' });
   const reset = h('button', { type: 'button', class: 'small' }, 'Use VLC (auto-detect)');
   const renderPlayer = (s: main.Settings) => {
@@ -507,7 +506,7 @@ const openSettings = async (): Promise<void> => {
     spellcheck: false,
   });
 
-  const levels: [string, string][] = [
+  const levels: [Level, string][] = [
     ['debug', 'Debug (until restart)'],
     ['info', 'Info'],
     ['warn', 'Warning'],
@@ -575,7 +574,6 @@ const openSettings = async (): Promise<void> => {
       try {
         await SetUserAgent(userAgent.value);
         await SetLogLevel(logLevel.value);
-        setLogLevel(logLevel.value);
         return true;
       } catch (error) {
         fail(error);
@@ -621,17 +619,7 @@ document.addEventListener('contextmenu', (e) => {
   if (!(e.target instanceof HTMLInputElement)) e.preventDefault();
 });
 
-/** Sends only lines at or above the saved level to Go. */
-const initLogLevel = async (): Promise<void> => {
-  try {
-    setLogLevel((await GetSettings()).logLevel);
-  } catch {
-    // The database failed to open; keep the default (Info).
-  }
-};
-
 const start = async (): Promise<void> => {
-  void initLogLevel();
   try {
     await loadPlaylists();
   } catch (error) {

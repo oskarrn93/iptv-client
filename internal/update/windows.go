@@ -41,7 +41,11 @@ func (windowsPlatform) Install(setupPath string) error {
 	if err != nil {
 		return err
 	}
-	ps := filepath.Join(os.Getenv("SystemRoot"), `System32\WindowsPowerShell\v1.0\powershell.exe`)
+	root := os.Getenv("SystemRoot")
+	if root == "" {
+		root = `C:\Windows` // never a relative path
+	}
+	ps := filepath.Join(root, `System32\WindowsPowerShell\v1.0\powershell.exe`)
 	cmd := exec.Command(ps, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", windowsHelper)
 	cmd.Env = append(os.Environ(),
 		"UPDATE_PID="+strconv.Itoa(os.Getpid()),

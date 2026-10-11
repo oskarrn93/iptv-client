@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"iptv-client/internal/database"
+	"iptv-client/internal/logging"
 )
 
 func newService(t *testing.T) *Service {
@@ -87,7 +88,7 @@ func TestLogLevel(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return l
+		return logging.LevelName(l)
 	}
 	if got := level(); got != "info" {
 		t.Errorf("default = %q", got)

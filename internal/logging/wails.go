@@ -3,6 +3,7 @@ package logging
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	wailslogger "github.com/wailsapp/wails/v2/pkg/logger"
 )
@@ -34,15 +35,9 @@ type wailsAdapter struct {
 
 func (a wailsAdapter) log(level slog.Level, msg string) {
 	ctx := context.Background()
-	if !a.l.Enabled(ctx, level) {
-		return
-	}
-	dropped, ok := a.limit.take()
-	if dropped > 0 {
-		a.l.Warn("wails log lines dropped", "n", dropped)
-	}
-	if ok {
-		a.l.Log(ctx, level, truncate(trimNewline(msg), wailsMaxMsg))
+	if a.limit.admit(ctx, a.l, level, "wails log lines dropped") {
+		// Wails messages end in a newline.
+		a.l.Log(ctx, level, truncate(strings.TrimSuffix(msg, "\n"), wailsMaxMsg))
 	}
 }
 

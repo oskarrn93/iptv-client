@@ -61,12 +61,8 @@ func RecoverCrashes(ctx context.Context, l *slog.Logger, dir string) {
 	}
 	paths, _ := filepath.Glob(filepath.Join(dir, crashPrefix+"*"+crashSuffix))
 	for _, p := range paths {
-		fi, err := os.Stat(p)
-		if err != nil || fi.Size() == 0 {
-			continue
-		}
 		out, err := readTail(p, maxCrashBytes)
-		if err != nil {
+		if err != nil || out == "" {
 			continue
 		}
 		run := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(p), crashPrefix), crashSuffix)

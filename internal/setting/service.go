@@ -6,6 +6,7 @@ package setting
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 
 	"iptv-client/internal/database"
@@ -99,16 +100,17 @@ func (s *Service) SetUserAgent(ctx context.Context, ua string) error {
 	return s.repo.Set(ctx, KeyUserAgent, ua)
 }
 
-// LogLevel returns the saved log level name (logging.LevelInfo if unset).
-func (s *Service) LogLevel(ctx context.Context) (string, error) {
+// LogLevel returns the saved log level (Info if unset).
+func (s *Service) LogLevel(ctx context.Context) (slog.Level, error) {
 	v, err := s.repo.Get(ctx, KeyLogLevel)
 	if err != nil || v == "" {
-		return logging.LevelInfo, err
+		return slog.LevelInfo, err
 	}
-	if _, err := logging.ParseLevel(v); err != nil {
-		return logging.LevelInfo, nil // ignore a corrupt value
+	l, err := logging.ParseLevel(v)
+	if err != nil {
+		return slog.LevelInfo, nil // ignore a corrupt value
 	}
-	return v, nil
+	return l, nil
 }
 
 // SetLogLevel saves a log level name. Debug is accepted but not saved, so

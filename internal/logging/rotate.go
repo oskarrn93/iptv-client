@@ -30,10 +30,9 @@ const filePrefix = "iptv-client-"
 // new part when a file grows too large, and prunes old files. It is safe
 // for concurrent use.
 type rotator struct {
-	dir    string
-	meta   Meta
-	now    func() time.Time
-	header func(time.Time) []byte
+	dir  string
+	meta Meta
+	now  func() time.Time
 
 	mu   sync.Mutex
 	f    *os.File
@@ -43,9 +42,7 @@ type rotator struct {
 }
 
 func newRotator(dir string, m Meta) *rotator {
-	r := &rotator{dir: dir, meta: m, now: time.Now}
-	r.header = r.defaultHeader
-	return r
+	return &rotator{dir: dir, meta: m, now: time.Now}
 }
 
 // open opens the first file, so Setup can report a failure.
@@ -91,11 +88,11 @@ func (r *rotator) rotate(now time.Time) error {
 		r.day, r.part = day, 0
 	}
 	r.part++
-	name := fmt.Sprintf("%s%s-%s.log", filePrefix, r.day, r.meta.Run)
+	name := filePrefix + r.day + "-" + r.meta.Run
 	if r.part > 1 {
-		name = fmt.Sprintf("%s%s-%s-%d.log", filePrefix, r.day, r.meta.Run, r.part)
+		name += fmt.Sprintf("-%d", r.part)
 	}
-	f, err := os.OpenFile(filepath.Join(r.dir, name), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	f, err := os.OpenFile(filepath.Join(r.dir, name+".log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
 	}
@@ -109,10 +106,10 @@ func (r *rotator) rotate(now time.Time) error {
 	return nil
 }
 
-// defaultHeader is the first line of each file: facts about the build and
+// header is the first line of each file: facts about the build and
 // system that do not change while the process runs. It is formatted with
 // its own handler, not the logger, so it cannot deadlock on mu.
-func (r *rotator) defaultHeader(now time.Time) []byte {
+func (r *rotator) header(now time.Time) []byte {
 	var buf bytes.Buffer
 	rec := slog.NewRecord(now, slog.LevelInfo, "log file opened", 0)
 	rec.AddAttrs(
