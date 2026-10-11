@@ -1,0 +1,6 @@
+﻿#EXTM3U
+#EXTINF:-1 group-title="Sport",Sky Sports
+http://example.com/sky
+
+#EXTINF:-1 group-title="Sport",Eurosport
+http://example.com/euro

@@ -1,0 +1,5 @@
+#EXTM3U
+#EXTINF:-1 tvg-name="Fallback Name" group-title="X",
+http://example.com/fallback
+#EXTINF:-1 group-title="X",
+http://example.com/urlname

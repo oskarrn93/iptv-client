@@ -1,0 +1,6 @@
+#EXTM3U
+#EXTGRP:Music
+#EXTINF:-1,MTV
+http://example.com/mtv
+#EXTINF:-1,Ungrouped After
+http://example.com/after

@@ -1,0 +1,8 @@
+#EXTM3U
+#EXTINF:-1 group-title="Ref",Needs Referrer
+#EXTVLCOPT:http-referrer=http://site.example.com/
+#EXTVLCOPT:http-user-agent=Mozilla/5.0 (X11)
+#EXTVLCOPT:sout=#file{dst=C:\evil.bat}
+http://example.com/ref
+#EXTINF:-1 group-title="Ref",No Options
+http://example.com/noopt
