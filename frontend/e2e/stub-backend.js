@@ -86,6 +86,9 @@
       window.__calls.push(['Play', id]);
       return 'VLC';
     },
+    async CopyStreamURL(id) {
+      window.__calls.push(['CopyStreamURL', id]);
+    },
     async RenamePlaylist(id, name) {
       playlist(id).name = name;
     },

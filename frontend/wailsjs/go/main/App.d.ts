@@ -14,6 +14,8 @@ export function Channels(arg1:Array<number>):Promise<Array<main.Channel>>;
 
 export function ChoosePlayer():Promise<main.Settings>;
 
+export function CopyStreamURL(arg1:number):Promise<void>;
+
 export function DeletePlaylist(arg1:number):Promise<void>;
 
 export function GetSettings():Promise<main.Settings>;

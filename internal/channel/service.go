@@ -49,6 +49,13 @@ func (s *Service) Get(ctx context.Context, id int64) (Channel, error) {
 	return s.repo.Get(ctx, id)
 }
 
+// StreamURL returns a channel's stream URL, e.g. to paste into a player that
+// is not supported directly.
+func (s *Service) StreamURL(ctx context.Context, id int64) (string, error) {
+	ch, err := s.repo.Get(ctx, id)
+	return ch.URL, err
+}
+
 // SetFavorite marks or unmarks a channel as favorite.
 func (s *Service) SetFavorite(ctx context.Context, channelID int64, favorite bool) error {
 	playlistID, key, err := s.repo.FavoriteKey(ctx, channelID)

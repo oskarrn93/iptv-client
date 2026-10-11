@@ -21,6 +21,9 @@ and SQLite.
   MPC-HC or PotPlayer. VLC, mpv and IINA receive the channel name and any
   allowed `#EXTVLCOPT` headers (User-Agent, Referrer); MPC-HC and PotPlayer
   only get the stream URL
+- Right-click a channel (or press Ctrl+C / ⌘C) to copy its stream URL and
+  paste it into any other player. Go writes the URL to the clipboard, so it
+  never reaches the UI (provider URLs often contain credentials)
 
 ## Security model
 

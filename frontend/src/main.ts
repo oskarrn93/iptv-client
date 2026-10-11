@@ -6,6 +6,7 @@ import {
   CancelImport,
   ChannelIDs,
   ChoosePlayer,
+  CopyStreamURL,
   DeletePlaylist,
   GetSettings,
   ListGroups,
@@ -22,6 +23,7 @@ import { EventsOn } from '../wailsjs/runtime/runtime';
 import { ChannelList } from './channel-list';
 import { confirmDialog, promptDialog, showDialog } from './dialogs';
 import { $, type Child, debounce, errorMessage, formatCount, h, plural, timeAgo } from './dom';
+import { showMenu } from './menu';
 
 type Selection = { kind: 'all' } | { kind: 'favorites' } | { kind: 'group'; name: string };
 
@@ -77,19 +79,43 @@ const setStatus = (text: string): void => {
 
 // ---------- channel list ----------
 
+const play = guard(async (channel: main.Channel) => {
+  const player = await Play(channel.id);
+  setStatus(`Opened “${channel.name}” in ${player}`);
+});
+
+const toggleFavorite = guard(async (channel: main.Channel) => {
+  await SetFavorite(channel.id, !channel.favorite);
+  if (state.selection.kind === 'favorites') {
+    await loadChannels({ keepScroll: true });
+  } else {
+    list.update({ ...channel, favorite: !channel.favorite });
+  }
+});
+
+// The URL itself is copied by Go and never shown here: it often contains
+// the provider credentials.
+const copyURL = guard(async (channel: main.Channel) => {
+  await CopyStreamURL(channel.id);
+  setStatus(`Copied the stream URL of “${channel.name}”`);
+});
+
+const modKey = /Mac/.test(navigator.userAgent) ? '⌘' : 'Ctrl+';
+
 const list = new ChannelList($('#channels'), {
-  onPlay: guard(async (channel) => {
-    const player = await Play(channel.id);
-    setStatus(`Opened “${channel.name}” in ${player}`);
-  }),
-  onToggleFavorite: guard(async (channel) => {
-    await SetFavorite(channel.id, !channel.favorite);
-    if (state.selection.kind === 'favorites') {
-      await loadChannels({ keepScroll: true });
-    } else {
-      list.update({ ...channel, favorite: !channel.favorite });
-    }
-  }),
+  onPlay: play,
+  onToggleFavorite: toggleFavorite,
+  onCopyURL: copyURL,
+  onContextMenu: (channel, x, y) =>
+    showMenu(x, y, [
+      { label: 'Play', shortcut: 'Enter', action: () => void play(channel) },
+      { label: 'Copy stream URL', shortcut: `${modKey}C`, action: () => void copyURL(channel) },
+      {
+        label: channel.favorite ? 'Remove from favorites' : 'Add to favorites',
+        shortcut: 'F',
+        action: () => void toggleFavorite(channel),
+      },
+    ]),
   onError: fail,
 });
 

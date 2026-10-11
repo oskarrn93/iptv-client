@@ -11,6 +11,9 @@ const CHUNK = 200; // rows fetched per request
 export interface ChannelListEvents {
   onPlay: (channel: Channel) => void;
   onToggleFavorite: (channel: Channel) => void;
+  onCopyURL: (channel: Channel) => void;
+  /** Right-click or the Menu key on a row; (x, y) is where to show a menu. */
+  onContextMenu: (channel: Channel, x: number, y: number) => void;
   onError: (error: unknown) => void;
 }
 
@@ -54,6 +57,13 @@ export class ChannelList {
       if ((e.target as HTMLElement).closest('[data-action]')) return;
       const channel = this.#channelAt(this.#indexOf(e));
       if (channel) this.events.onPlay(channel);
+    });
+    element.addEventListener('contextmenu', (e) => {
+      const channel = this.#channelAt(this.#indexOf(e));
+      if (!channel) return;
+      e.preventDefault();
+      this.element.focus();
+      this.events.onContextMenu(channel, e.clientX, e.clientY);
     });
     new ResizeObserver(() => this.#schedule()).observe(element);
   }
@@ -234,6 +244,13 @@ export class ChannelList {
     } else if (e.key.toLowerCase() === 'f' && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
       this.events.onToggleFavorite(channel);
+    } else if (e.key.toLowerCase() === 'c' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      this.events.onCopyURL(channel);
+    } else if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+      e.preventDefault();
+      const row = this.#spacer.querySelector('.channel-row.selected')?.getBoundingClientRect();
+      if (row) this.events.onContextMenu(channel, row.left + 24, row.bottom);
     }
   }
 }

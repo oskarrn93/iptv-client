@@ -324,6 +324,21 @@ func (a *App) Play(channelID int64) (string, error) {
 	return svc.channels.Play(a.ctx, channelID)
 }
 
+// CopyStreamURL puts a channel's stream URL on the clipboard. The URL is
+// copied from Go so it never reaches the UI: provider URLs often embed the
+// account credentials.
+func (a *App) CopyStreamURL(channelID int64) error {
+	svc, err := a.ready()
+	if err != nil {
+		return err
+	}
+	url, err := svc.channels.StreamURL(a.ctx, channelID)
+	if err != nil {
+		return err
+	}
+	return runtime.ClipboardSetText(a.ctx, url)
+}
+
 // --- settings ---
 
 // GetSettings returns the current settings.

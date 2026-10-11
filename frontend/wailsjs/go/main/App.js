@@ -26,6 +26,10 @@ export function ChoosePlayer() {
   return window['go']['main']['App']['ChoosePlayer']();
 }
 
+export function CopyStreamURL(arg1) {
+  return window['go']['main']['App']['CopyStreamURL'](arg1);
+}
+
 export function DeletePlaylist(arg1) {
   return window['go']['main']['App']['DeletePlaylist'](arg1);
 }
