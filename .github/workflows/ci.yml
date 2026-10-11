@@ -40,7 +40,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       # Untrusted playlist text must never be parsed as HTML (C3 in the review).
       - name: Reject HTML sinks
-        run: "! grep -rnE 'innerHTML|outerHTML|insertAdjacentHTML|document\.write|\beval\(|new Function' src"
+        run: |
+          ! grep -rnE 'innerHTML|outerHTML|insertAdjacentHTML|document\.write|\beval\(|new Function' src
       - run: npm ci
       # Builds dist (with the production CSP) and drives it in Chrome.
       - run: npm run test:e2e
