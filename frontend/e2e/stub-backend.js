@@ -138,7 +138,7 @@
       return api.GetSettings();
     },
     async SetLogLevel(level) {
-      if (!['debug', 'info', 'warn', 'error'].includes(level)) throw `invalid log level "${level}"`;
+      if (!['debug', 'info', 'warn', 'error'].includes(level)) throw 'invalid log level';
       window.__logLevel = level;
     },
     async OpenLogFolder() {
