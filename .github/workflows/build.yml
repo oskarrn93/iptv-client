@@ -43,7 +43,7 @@ jobs:
       # build/windows/installer/project.nsi.
       - run: go tool wails build -clean -trimpath -nsis -ldflags "-X main.version=${{ env.VERSION }}"
       - run: Move-Item build/bin/iptv-client-amd64-installer.exe iptv-client-windows-amd64-setup.exe
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: iptv-client-windows-amd64
           path: iptv-client-windows-amd64-setup.exe
@@ -82,7 +82,7 @@ jobs:
             --icon iptv-client.app 140 180 --hide-extension iptv-client.app \
             --app-drop-link 400 180 \
             iptv-client-macos-universal.dmg dmg
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: iptv-client-macos-universal
           path: iptv-client-macos-universal.dmg
