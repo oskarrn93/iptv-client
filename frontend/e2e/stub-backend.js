@@ -2,6 +2,8 @@
 // runtime, so the built frontend can be tested in a normal browser. It
 // mirrors the behaviour of app.go closely enough for UI tests; the real Go
 // code has its own unit tests. Loaded as a classic script before the app.
+// A script loaded first can set window.__stubSeed(addPlaylist) to replace the
+// test data; demo-data.js does this for the README screenshots.
 (() => {
   const groupsOf = (n) => n % 120;
   const channels = new Map(); // id -> {id, playlistId, name, group, tvgId}
@@ -11,34 +13,41 @@
   let nextPlaylist = 1;
   const listeners = new Map();
   const now = () => Math.floor(Date.now() / 1000);
+  const fold = (s) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+  const favKey = (c) => `${c.playlistId}|${c.tvgId}|${c.name.toLowerCase()}`;
 
+  // entries: [{name, group, tvgId, favorite?}]
   const addPlaylist = (name, sourceType, source, entries) => {
     const id = nextPlaylist++;
-    for (const e of entries) {
+    for (const { favorite, ...e } of entries) {
       const cid = nextId++;
-      channels.set(cid, { id: cid, playlistId: id, position: cid, ...e });
+      const c = { id: cid, playlistId: id, position: cid, ...e };
+      channels.set(cid, c);
+      if (favorite) favorites.add(favKey(c));
     }
     const p = { id, name, sourceType, source, channelCount: entries.length, lastRefreshedAt: now() };
     playlists.push(p);
     return p;
   };
 
-  const big = [
-    { name: '<img src=x onerror="window.__xss=1">Evil Channel', group: '<b>Bold Group</b>', tvgId: 'xss' },
-    { name: 'Mux Test Stream', group: 'Test', tvgId: '' },
-  ];
-  for (let i = 1; i <= 50000; i++) {
-    big.push({ name: `Kanal ${i} HD Ünïcödé`, group: `Group ${groupsOf(i)} Sport & Nyheter`, tvgId: `c${i}` });
+  if (window.__stubSeed) {
+    window.__stubSeed(addPlaylist);
+  } else {
+    const big = [
+      { name: '<img src=x onerror="window.__xss=1">Evil Channel', group: '<b>Bold Group</b>', tvgId: 'xss' },
+      { name: 'Mux Test Stream', group: 'Test', tvgId: '' },
+    ];
+    for (let i = 1; i <= 50000; i++) {
+      big.push({ name: `Kanal ${i} HD Ünïcödé`, group: `Group ${groupsOf(i)} Sport & Nyheter`, tvgId: `c${i}` });
+    }
+    addPlaylist('Big Test List', 'url', 'http://provider.example/…', big);
+    addPlaylist('Small List', 'file', 'C:\\lists\\small.m3u', [
+      { name: 'BBC One HD', group: 'UK', tvgId: 'bbc1' },
+      { name: 'BBC One SD', group: 'UK', tvgId: 'bbc1' },
+      { name: 'CNN', group: 'News', tvgId: 'cnn' },
+    ]);
   }
-  addPlaylist('Big Test List', 'url', 'http://provider.example/…', big);
-  addPlaylist('Small List', 'file', 'C:\\lists\\small.m3u', [
-    { name: 'BBC One HD', group: 'UK', tvgId: 'bbc1' },
-    { name: 'BBC One SD', group: 'UK', tvgId: 'bbc1' },
-    { name: 'CNN', group: 'News', tvgId: 'cnn' },
-  ]);
 
-  const fold = (s) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
-  const favKey = (c) => `${c.playlistId}|${c.tvgId}|${c.name.toLowerCase()}`;
   const byPlaylist = (pid) => [...channels.values()].filter((c) => c.playlistId === pid);
   const delay = (ms = 5) => new Promise((r) => setTimeout(r, ms));
   const emit = (name, ...args) => (listeners.get(name) ?? []).forEach((cb) => cb(...args));

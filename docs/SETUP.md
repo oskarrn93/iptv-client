@@ -126,6 +126,7 @@ Run from the repository root.
 | Fuzz log redaction (Linux/macOS) | `go test ./internal/redact -run '^$' -fuzz FuzzString -fuzztime 30s` |
 | UI tests (headless Edge) | `cd frontend && npm run test:e2e` |
 | UI tests with Chrome / screenshots | `E2E_BROWSER=chrome E2E_SCREENSHOTS=./shots npm run test:e2e` |
+| Update the README screenshots | `cd frontend && npm run screenshots` (commit `docs/screenshot*.png`) |
 | Regenerate TS bindings after changing `app.go` | `go tool wails generate module` (commit `frontend/wailsjs`) |
 | Format check | `gofmt -l .` (should print nothing) |
 | Debug CLI (no GUI) | `go run ./cmd/iptv-debug -h` |
@@ -144,6 +145,15 @@ code is covered by the Go unit tests.
 
 Playwright's `waitForFunction` does not work under the production CSP, which
 forbids evaluating strings, so the tests use their own `waitFor` helper instead.
+
+### README screenshots
+
+`npm run screenshots` (in `frontend/`) builds `dist` and writes
+`docs/screenshot.png` and `docs/screenshot-dark.png` (light and dark mode, 2×
+scale) using the same stub backend, seeded with fictional channels from
+`frontend/e2e/demo-data.js` instead of the test data. Never use a real
+playlist for screenshots. Rerun it after visible UI changes and commit the
+images; edit `e2e/screenshots.mjs` to change what is shown.
 
 ### Debug CLI
 

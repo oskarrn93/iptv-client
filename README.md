@@ -7,6 +7,11 @@ lets you browse them by group, search them, and opens channels in
 Built with Go, [Wails](https://wails.io) (native window and system webview)
 and SQLite.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
+  <img alt="IPTV Client: playlists, groups and the channel list" src="docs/screenshot.png">
+</picture>
+
 > **Status:** core library, debug CLI and GUI are working on Windows; macOS
 > builds are produced by CI but not yet verified on a Mac.
 
@@ -51,7 +56,7 @@ folder becomes `~`). Provider host names are kept. Logs stay on this computer
 ```
 main.go, app.go        Wails entry point and GUI bindings
 frontend/              UI (Vite + TypeScript, no framework)
-frontend/e2e           UI tests against a stubbed backend
+frontend/e2e           UI tests and README screenshots against a stubbed backend
 internal/playlist      playlists: add, import/refresh, rename, delete (service + repository)
 internal/channel       channels: browse, search, favorites, play (service + repositories)
 internal/setting       settings: player location, User-Agent, log level (service + repository)

@@ -16,6 +16,7 @@ Run from the repo root. The Wails CLI is pinned in `go.mod` as a Go tool: always
 | Fuzz the parser (CI/Linux only, see below) | `go test ./internal/m3u -run '^$' -fuzz FuzzParse -fuzztime 60s` |
 | Format / vet (CI enforces both) | `gofmt -l .` (must print nothing), `go vet ./internal/... ./cmd/...` |
 | UI tests (builds `dist`, headless Edge) | `cd frontend && npm run test:e2e` (`E2E_BROWSER=chrome`, `E2E_SCREENSHOTS=./shots` optional) |
+| Update README screenshots (fictional demo data, `docs/screenshot*.png`) | `cd frontend && npm run screenshots` |
 | Production build | `go tool wails build -clean -trimpath` → `build/bin/` |
 | Build without regenerating bindings | `go tool wails build -skipbindings` |
 | Regenerate TS bindings after changing `App`'s exported API | `go tool wails generate module`, then commit `frontend/wailsjs` |

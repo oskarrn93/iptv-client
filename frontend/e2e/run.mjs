@@ -6,38 +6,13 @@
 //   E2E_SCREENSHOTS=dir npm run test:e2e
 //
 // Uses an installed Edge/Chrome via playwright-core; no browser download.
-import { readFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
-import { extname, join, normalize } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { chromium } from 'playwright-core';
+import { serve } from './serve.mjs';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
-const dist = join(here, '..', 'dist');
 const shots = process.env.E2E_SCREENSHOTS;
-const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
-
-const server = createServer(async (req, res) => {
-  try {
-    const path = new URL(req.url, 'http://x').pathname;
-    if (path === '/e2e-stub.js') {
-      res.writeHead(200, { 'content-type': types['.js'] }).end(await readFile(join(here, 'stub-backend.js')));
-      return;
-    }
-    const file = normalize(join(dist, path === '/' ? 'index.html' : path));
-    if (!file.startsWith(dist)) throw new Error('outside dist');
-    let body = await readFile(file);
-    if (file.endsWith('index.html')) {
-      // The stub stands in for the scripts Wails injects into the page.
-      body = body.toString().replace('<meta charset', '<script src="/e2e-stub.js"></script>\n  <meta charset');
-    }
-    res.writeHead(200, { 'content-type': types[extname(file)] ?? 'application/octet-stream' }).end(body);
-  } catch {
-    res.writeHead(404).end();
-  }
-});
-await new Promise((r) => server.listen(0, '127.0.0.1', r));
-const url = `http://127.0.0.1:${server.address().port}/`;
+const server = await serve(['stub-backend.js']);
+const url = server.url;
 
 const results = [];
 const check = (name, ok, detail = '') => {
