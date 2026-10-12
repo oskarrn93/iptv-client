@@ -45,15 +45,15 @@ var codeHosts = map[string]bool{
 	"modernc.org": true,
 }
 
-// Redactor redacts text for one home directory.
-type Redactor struct {
+// redactor redacts text for one home directory.
+type redactor struct {
 	home *regexp.Regexp // nil if the home directory is unknown
 }
 
-// New returns a Redactor that replaces home with "~". An empty home disables
-// path redaction.
-func New(home string) *Redactor {
-	r := &Redactor{}
+// newRedactor returns a redactor that replaces home with "~". An empty home
+// disables path redaction.
+func newRedactor(home string) *redactor {
+	r := &redactor{}
 	home = strings.TrimRight(home, `/\`)
 	if len(home) < 2 {
 		return r
@@ -72,9 +72,9 @@ func New(home string) *Redactor {
 	return r
 }
 
-var std = func() *Redactor {
+var std = func() *redactor {
 	home, _ := os.UserHomeDir()
-	return New(home)
+	return newRedactor(home)
 }()
 
 // String redacts s with the current user's home directory.
@@ -82,14 +82,18 @@ func String(s string) string { return std.String(s) }
 
 // String returns s with every URL-like part reduced to its scheme and host
 // and the home directory replaced by "~".
-func (r *Redactor) String(s string) string {
+func (r *redactor) String(s string) string {
+	// Every pattern, and the home directory, contains a slash or backslash.
+	if !strings.ContainsAny(s, `/\`) {
+		return s
+	}
 	if strings.Contains(s, `:\/\/`) {
 		s = escapedURL.ReplaceAllString(s, `${1}:\/\/…`)
 	}
-	if strings.Contains(s, "@") {
+	if strings.Contains(s, "://") {
 		s = userInfo.ReplaceAllString(s, "${1}…@")
 	}
-	if strings.ContainsAny(s, ":/") {
+	if strings.IndexByte(s, '/') >= 0 {
 		s = urlish.ReplaceAllStringFunc(s, redactURL)
 	}
 	if r.home != nil {

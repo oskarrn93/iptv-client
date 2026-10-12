@@ -2,6 +2,7 @@ package setting
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -93,24 +94,19 @@ func TestLogLevel(t *testing.T) {
 	if got := level(); got != "info" {
 		t.Errorf("default = %q", got)
 	}
-	if err := svc.SetLogLevel(ctx, "warn"); err != nil {
+	if err := svc.SetLogLevel(ctx, slog.LevelWarn); err != nil {
 		t.Fatal(err)
 	}
 	if got := level(); got != "warn" {
 		t.Errorf("after warn = %q", got)
 	}
-	if err := svc.SetLogLevel(ctx, "debug"); err != nil {
+	if err := svc.SetLogLevel(ctx, slog.LevelDebug); err != nil {
 		t.Fatal(err)
 	}
 	if got := level(); got != "warn" {
 		t.Errorf("debug was saved: %q", got)
 	}
-	for _, bad := range []string{"", "trace", "DEBUG", "info; drop table"} {
-		if err := svc.SetLogLevel(ctx, bad); err == nil {
-			t.Errorf("%q accepted", bad)
-		}
-	}
-	if err := svc.SetLogLevel(ctx, "info"); err != nil {
+	if err := svc.SetLogLevel(ctx, slog.LevelInfo); err != nil {
 		t.Fatal(err)
 	}
 	if v, _ := svc.repo.Get(ctx, KeyLogLevel); v != "" {

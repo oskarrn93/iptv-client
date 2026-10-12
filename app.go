@@ -97,9 +97,13 @@ func (a *App) started(ctx context.Context) {
 		a.logLevel.Set(level)
 	}
 	a.log.InfoContext(ctx, "database open", "log_level", logging.LevelName(a.logLevel.Level()))
-	if s, err := a.svc.settings.Get(ctx); err == nil {
-		a.log.InfoContext(ctx, "player", "name", s.PlayerName, "chosen", s.PlayerOverride, "found", s.PlayerError == nil)
-	}
+	// Finding the player reads the registry and searches folders; don't
+	// hold up the window for a log line.
+	go func() {
+		if s, err := a.svc.settings.Get(ctx); err == nil {
+			a.log.InfoContext(ctx, "player", "name", s.PlayerName, "chosen", s.PlayerOverride, "found", s.PlayerError == nil)
+		}
+	}()
 }
 
 func (a *App) shutdown(ctx context.Context) {
@@ -137,7 +141,7 @@ func (a *App) call(op string, attrs ...slog.Attr) (ctx context.Context, end func
 // expectedError reports errors that are part of normal use, or were
 // already logged.
 func expectedError(err error) bool {
-	return errors.Is(err, errImportCancelled) || errors.Is(err, errImportRunning) ||
+	return errors.Is(err, errImportRunning) ||
 		errors.Is(err, database.ErrNotFound) || errors.Is(err, errNoDatabase) ||
 		errors.Is(err, context.Canceled)
 }
@@ -269,14 +273,12 @@ func (a *App) add(name, source string, typ playlist.SourceType) (_ ImportResult,
 		return ImportResult{}, err
 	}
 	defer done()
-	start := time.Now()
-	a.log.InfoContext(ctx, "import started")
+	finished := a.importStarted(ctx)
 	p, res, err := svc.playlists.Add(ctx, name, source, a.progress)
 	if err != nil {
 		return ImportResult{}, importError(err)
 	}
-	a.log.InfoContext(ctx, "import finished", "playlist_id", p.ID, "imported", res.Imported,
-		"skipped", res.Skipped, "hls", res.HLS, "took", time.Since(start).Round(time.Millisecond))
+	finished(res, "playlist_id", p.ID)
 	dto := toPlaylist(p)
 	return ImportResult{Playlist: &dto, Imported: res.Imported, Skipped: res.Skipped}, nil
 }
@@ -295,8 +297,7 @@ func (a *App) RefreshPlaylist(id int64, force bool) (_ ImportResult, err error) 
 		return ImportResult{}, err
 	}
 	defer done()
-	start := time.Now()
-	a.log.InfoContext(ctx, "import started")
+	finished := a.importStarted(ctx)
 	res, err := svc.playlists.Refresh(ctx, id, force, a.progress)
 	var tooSoon *playlist.TooSoonError
 	if errors.As(err, &tooSoon) {
@@ -306,8 +307,7 @@ func (a *App) RefreshPlaylist(id int64, force bool) (_ ImportResult, err error) 
 	if err != nil {
 		return ImportResult{Skipped: res.Skipped}, importError(err)
 	}
-	a.log.InfoContext(ctx, "import finished", "imported", res.Imported, "skipped", res.Skipped,
-		"not_modified", res.NotModified, "hls", res.HLS, "took", time.Since(start).Round(time.Millisecond))
+	finished(res, "not_modified", res.NotModified)
 	p, err := svc.playlists.Get(ctx, id)
 	if err != nil {
 		return ImportResult{}, err
@@ -557,7 +557,7 @@ func (a *App) SetLogLevel(level string) (err error) {
 		return err
 	}
 	if svc, err := a.ready(); err == nil {
-		if err := svc.settings.SetLogLevel(ctx, level); err != nil {
+		if err := svc.settings.SetLogLevel(ctx, l); err != nil {
 			return err
 		}
 	}
@@ -653,17 +653,34 @@ func toPlaylist(p playlist.Playlist) Playlist {
 	}
 }
 
-// errImportCancelled is returned when the user cancels an import.
-var errImportCancelled = errors.New("import cancelled; the previous channel list was kept")
+// importStarted logs the start of an import and returns a func that logs
+// its result and duration.
+func (a *App) importStarted(ctx context.Context) func(res playlist.RefreshResult, attrs ...any) {
+	start := time.Now()
+	a.log.InfoContext(ctx, "import started")
+	return func(res playlist.RefreshResult, attrs ...any) {
+		a.log.InfoContext(ctx, "import finished", append([]any{"imported", res.Imported, "skipped", res.Skipped,
+			"hls", res.HLS, "took", time.Since(start).Round(time.Millisecond)}, attrs...)...)
+	}
+}
+
+// uiError replaces an error's message for the UI but keeps it for errors.Is.
+type uiError struct {
+	msg string
+	err error
+}
+
+func (e uiError) Error() string { return e.msg }
+func (e uiError) Unwrap() error { return e.err }
 
 // importError rewrites add/refresh errors that would otherwise read poorly
 // in the UI.
 func importError(err error) error {
 	switch {
 	case errors.Is(err, context.Canceled):
-		return errImportCancelled
+		return uiError{"import cancelled; the previous channel list was kept", err}
 	case errors.Is(err, context.DeadlineExceeded):
-		return errors.New("import timed out; the previous channel list was kept")
+		return uiError{"import timed out; the previous channel list was kept", err}
 	case errors.Is(err, fetch.ErrTooLarge):
 		return fmt.Errorf("%w (limit %d MB)", err, fetch.DefaultMaxBytes>>20)
 	}

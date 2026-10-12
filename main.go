@@ -23,8 +23,8 @@ func main() {
 	// If the folder is unusable it falls back to stderr and the app runs.
 	dir, _ := logging.Dir()
 	logs, _ := logging.Setup(dir, logging.Meta{Version: version, Run: logging.NewRun()})
-	logging.RecoverCrashes(context.Background(), logs.Logger, logs.Dir)
-	app := NewApp(logs.Logger, logs.Level, logs.Dir)
+	logging.RecoverCrashes(context.Background(), logs.Logger, dir)
+	app := NewApp(logs.Logger, logs.Level, dir)
 
 	err := wails.Run(&options.App{
 		Title:     "IPTV Client",

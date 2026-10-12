@@ -43,7 +43,6 @@ func NewRun() string {
 type Logs struct {
 	Logger *slog.Logger
 	Level  *slog.LevelVar // starts at Info
-	Dir    string         // the folder the files are written to
 
 	w     *rotator // nil when logging to stderr
 	crash *os.File
@@ -54,7 +53,7 @@ type Logs struct {
 // there too). If dir cannot be used, it logs to stderr and returns the error
 // alongside working Logs.
 func Setup(dir string, m Meta) (*Logs, error) {
-	l := &Logs{Level: new(slog.LevelVar), Dir: dir}
+	l := &Logs{Level: new(slog.LevelVar)}
 	var out io.Writer = os.Stderr
 	err := os.MkdirAll(dir, 0o700)
 	if err == nil {
@@ -194,14 +193,7 @@ func redactAttr(groups []string, a slog.Attr) slog.Attr {
 		a.Value = slog.StringValue(redact.String(a.Value.String()))
 	case slog.KindAny:
 		// Errors, Stringers, structs: format, then redact the text.
-		var s string
-		switch v := a.Value.Any().(type) {
-		case error:
-			s = v.Error()
-		default:
-			s = fmt.Sprint(v)
-		}
-		a.Value = slog.StringValue(redact.String(s))
+		a.Value = slog.StringValue(redact.String(fmt.Sprint(a.Value.Any())))
 	}
 	return a
 }

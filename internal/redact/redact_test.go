@@ -7,7 +7,7 @@ import (
 )
 
 func TestURLs(t *testing.T) {
-	r := New("")
+	r := newRedactor("")
 	tests := []struct{ in, want string }{
 		{"http://provider.tv/get.php?username=u&password=p", "http://provider.tv/…"},
 		{"http://user:pass@provider.tv:8080", "http://provider.tv:8080/…"},
@@ -49,7 +49,7 @@ func TestURLs(t *testing.T) {
 }
 
 func TestHome(t *testing.T) {
-	r := New(`C:\Users\Alice`)
+	r := newRedactor(`C:\Users\Alice`)
 	tests := []struct{ in, want string }{
 		{`open C:\Users\Alice\lists\a.m3u: not found`, `open ~\lists\a.m3u: not found`},
 		{`"C:\\Users\\Alice\\lists\\a.m3u"`, `"~\\lists\\a.m3u"`},
@@ -61,7 +61,7 @@ func TestHome(t *testing.T) {
 			t.Errorf("String(%q) = %q, want %q", tt.in, got, tt.want)
 		}
 	}
-	if got := New("/Users/alice").String("/Users/alice/Library/x"); got != "~/Library/x" {
+	if got := newRedactor("/Users/alice").String("/Users/alice/Library/x"); got != "~/Library/x" {
 		t.Errorf("POSIX home: got %q", got)
 	}
 }
@@ -90,7 +90,7 @@ func FuzzString(f *testing.F) {
 			if strings.Contains(before, secret) || strings.Contains(after, secret) {
 				return
 			}
-			if got := New("").String(in); strings.Contains(got, secret) {
+			if got := newRedactor("").String(in); strings.Contains(got, secret) {
 				t.Fatalf("secret survived: %q -> %q", in, got)
 			}
 		}

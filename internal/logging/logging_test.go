@@ -173,7 +173,7 @@ func TestSetupAndRecoverCrashes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer slog.SetDefault(slog.New(slog.DiscardHandler))
-	RecoverCrashes(context.Background(), l.Logger, l.Dir)
+	RecoverCrashes(context.Background(), l.Logger, dir)
 	l.Logger.Info("hello")
 	if err := l.Close(); err != nil {
 		t.Fatal(err)

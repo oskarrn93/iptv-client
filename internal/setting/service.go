@@ -113,18 +113,15 @@ func (s *Service) LogLevel(ctx context.Context) (slog.Level, error) {
 	return l, nil
 }
 
-// SetLogLevel saves a log level name. Debug is accepted but not saved, so
-// it lasts until the app restarts and a forgotten Debug cannot fill the
-// disk; the previously saved level is kept.
-func (s *Service) SetLogLevel(ctx context.Context, level string) error {
-	if _, err := logging.ParseLevel(level); err != nil {
-		return err
-	}
-	switch level {
-	case logging.LevelDebug:
+// SetLogLevel saves a log level. Debug is accepted but not saved, so it
+// lasts until the app restarts and a forgotten Debug cannot fill the disk;
+// the previously saved level is kept.
+func (s *Service) SetLogLevel(ctx context.Context, level slog.Level) error {
+	switch {
+	case level < slog.LevelInfo:
 		return nil
-	case logging.LevelInfo:
+	case level == slog.LevelInfo:
 		return s.repo.Delete(ctx, KeyLogLevel)
 	}
-	return s.repo.Set(ctx, KeyLogLevel, level)
+	return s.repo.Set(ctx, KeyLogLevel, logging.LevelName(level))
 }

@@ -34,11 +34,12 @@ type rotator struct {
 	meta Meta
 	now  func() time.Time
 
-	mu   sync.Mutex
-	f    *os.File
-	day  string
-	part int
-	size int64
+	mu      sync.Mutex
+	f       *os.File
+	day     string
+	nextDay time.Time // midnight after day, checked per line without formatting
+	part    int
+	size    int64
 }
 
 func newRotator(dir string, m Meta) *rotator {
@@ -56,7 +57,7 @@ func (r *rotator) Write(p []byte) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.now()
-	if r.f == nil || now.Format(time.DateOnly) != r.day || (r.size > 0 && r.size+int64(len(p)) > maxFileSize) {
+	if r.f == nil || !now.Before(r.nextDay) || (r.size > 0 && r.size+int64(len(p)) > maxFileSize) {
 		if err := r.rotate(now); err != nil {
 			return 0, err
 		}
@@ -85,7 +86,9 @@ func (r *rotator) rotate(now time.Time) error {
 	}
 	day := now.Format(time.DateOnly)
 	if day != r.day {
+		y, m, d := now.Date()
 		r.day, r.part = day, 0
+		r.nextDay = time.Date(y, m, d+1, 0, 0, 0, 0, now.Location())
 	}
 	r.part++
 	name := filePrefix + r.day + "-" + r.meta.Run

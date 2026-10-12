@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+
+	"iptv-client/internal/desktop"
 )
 
 // windowsPlatform installs the NSIS setup.exe.
@@ -41,11 +43,7 @@ func (windowsPlatform) Install(setupPath string) error {
 	if err != nil {
 		return err
 	}
-	root := os.Getenv("SystemRoot")
-	if root == "" {
-		root = `C:\Windows` // never a relative path
-	}
-	ps := filepath.Join(root, `System32\WindowsPowerShell\v1.0\powershell.exe`)
+	ps := filepath.Join(desktop.WindowsDir(), `System32\WindowsPowerShell\v1.0\powershell.exe`)
 	cmd := exec.Command(ps, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", windowsHelper)
 	cmd.Env = append(os.Environ(),
 		"UPDATE_PID="+strconv.Itoa(os.Getpid()),

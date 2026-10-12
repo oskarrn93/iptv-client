@@ -23,11 +23,7 @@ func OpenFolder(dir string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
-		root := os.Getenv("SystemRoot")
-		if root == "" {
-			root = `C:\Windows`
-		}
-		cmd = exec.Command(filepath.Join(root, "explorer.exe"), dir)
+		cmd = exec.Command(filepath.Join(WindowsDir(), "explorer.exe"), dir)
 	case "darwin":
 		cmd = exec.Command("/usr/bin/open", dir)
 	default:
@@ -40,4 +36,14 @@ func OpenFolder(dir string) error {
 	}
 	go cmd.Wait()
 	return nil
+}
+
+// WindowsDir returns the Windows folder (%SystemRoot%), for starting system
+// programs by their full path. It is never relative, so an unset variable
+// cannot make exec look in the current folder.
+func WindowsDir() string {
+	if root := os.Getenv("SystemRoot"); root != "" {
+		return root
+	}
+	return `C:\Windows`
 }
