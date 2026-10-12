@@ -3,7 +3,11 @@
 // playlist's channels (stored by the channel package) in one transaction.
 package playlist
 
-import "time"
+import (
+	"time"
+
+	"iptv-client/internal/fetch"
+)
 
 // SourceType says where a playlist is loaded from.
 type SourceType string
@@ -24,4 +28,13 @@ type Playlist struct {
 	LastRefreshedAt time.Time // zero if never refreshed successfully
 	ChannelCount    int
 	CreatedAt       time.Time
+}
+
+// DisplaySource is the source as it may be shown: a URL is redacted, since
+// it often carries account credentials.
+func (p Playlist) DisplaySource() string {
+	if p.SourceType == SourceURL {
+		return fetch.Redact(p.Source)
+	}
+	return p.Source
 }

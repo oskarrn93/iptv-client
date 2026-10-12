@@ -39,8 +39,14 @@ type Result struct {
 	NotModified  bool
 }
 
-// ErrTooLarge is returned by Body.Read once MaxBytes is exceeded.
+// ErrTooLarge is returned, wrapped with the limit, when the playlist is
+// larger than MaxBytes: by URL or File if the size is known up front,
+// otherwise by Body.Read once the limit is passed.
 var ErrTooLarge = errors.New("playlist is larger than the allowed maximum")
+
+func tooLarge(limit int64) error {
+	return fmt.Errorf("%w (limit %d MB)", ErrTooLarge, limit>>20)
+}
 
 var defaultClient = NewClient("http", "https")
 
@@ -111,7 +117,7 @@ func URL(ctx context.Context, rawURL string, o Options) (Result, error) {
 	}
 	if resp.ContentLength > maxBytes(o) {
 		resp.Body.Close()
-		return Result{}, ErrTooLarge
+		return Result{}, tooLarge(maxBytes(o))
 	}
 	return Result{
 		Body:         limit(resp.Body, maxBytes(o)),
@@ -128,7 +134,7 @@ func File(path string, o Options) (Result, error) {
 	}
 	if fi, err := f.Stat(); err == nil && fi.Size() > maxBytes(o) {
 		f.Close()
-		return Result{}, ErrTooLarge
+		return Result{}, tooLarge(maxBytes(o))
 	}
 	return Result{Body: limit(f, maxBytes(o))}, nil
 }
@@ -182,18 +188,19 @@ type limitedBody struct {
 	r      io.Reader
 	c      io.Closer
 	remain int64
+	max    int64
 }
 
 func limit(rc io.ReadCloser, n int64) io.ReadCloser {
 	// Read one extra byte so "exactly n" and "more than n" can be told apart.
-	return &limitedBody{r: io.LimitReader(rc, n+1), c: rc, remain: n}
+	return &limitedBody{r: io.LimitReader(rc, n+1), c: rc, remain: n, max: n}
 }
 
 func (l *limitedBody) Read(p []byte) (int, error) {
 	n, err := l.r.Read(p)
 	l.remain -= int64(n)
 	if l.remain < 0 {
-		return 0, ErrTooLarge
+		return 0, tooLarge(l.max)
 	}
 	return n, err
 }

@@ -80,7 +80,7 @@ func TestLevelAppliesToWails(t *testing.T) {
 }
 
 func TestParseLevel(t *testing.T) {
-	for _, s := range []string{LevelDebug, LevelInfo, LevelWarn, LevelError} {
+	for _, s := range []string{levelDebug, levelInfo, levelWarn, levelError} {
 		l, err := ParseLevel(s)
 		if err != nil || LevelName(l) != s {
 			t.Errorf("%s: %v %v", s, l, err)

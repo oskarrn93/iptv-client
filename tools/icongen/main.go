@@ -24,6 +24,14 @@ func roundRect(x, y, cx, cy, hw, hh, r float64) float64 {
 	return math.Hypot(ox, oy) + math.Min(math.Max(qx, qy), 0) - r
 }
 
+// Distance from (px, py) to the segment a–b.
+func segment(px, py float64, a, b [2]float64) float64 {
+	ex, ey := b[0]-a[0], b[1]-a[1]
+	wx, wy := px-a[0], py-a[1]
+	t := math.Max(0, math.Min(1, (wx*ex+wy*ey)/(ex*ex+ey*ey)))
+	return math.Hypot(wx-ex*t, wy-ey*t)
+}
+
 // Signed distance to a triangle (a, b, c), negative inside.
 func triangle(px, py float64, p [3][2]float64) float64 {
 	d := math.Inf(1)
@@ -32,9 +40,7 @@ func triangle(px, py float64, p [3][2]float64) float64 {
 		a, b := p[i], p[(i+1)%3]
 		ex, ey := b[0]-a[0], b[1]-a[1]
 		wx, wy := px-a[0], py-a[1]
-		t := math.Max(0, math.Min(1, (wx*ex+wy*ey)/(ex*ex+ey*ey)))
-		dx, dy := wx-ex*t, wy-ey*t
-		d = math.Min(d, math.Hypot(dx, dy))
+		d = math.Min(d, segment(px, py, a, b))
 		cross := ex*wy - ey*wx
 		if i == 0 {
 			sign = math.Copysign(1, cross)
@@ -74,11 +80,7 @@ func sample(x, y float64) rgba {
 	}
 	// Antenna legs.
 	for _, s := range []float64{-1, 1} {
-		ax, ay := 512+s*110, 255.0
-		tx, ty := 512.0, 345.0
-		ex, ey := tx-ax, ty-ay
-		t := math.Max(0, math.Min(1, ((x-ax)*ex+(y-ay)*ey)/(ex*ex+ey*ey)))
-		if math.Hypot(x-ax-ex*t, y-ay-ey*t) <= 19 {
+		if segment(x, y, [2]float64{512 + s*110, 255}, [2]float64{512, 345}) <= 19 {
 			c = over(c, white)
 		}
 	}

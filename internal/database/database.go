@@ -145,28 +145,25 @@ SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sche
 	if err != nil || !legacy {
 		return err
 	}
-	tx, err := d.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	var version int
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&version); err != nil {
-		return err
-	}
-	// Same table definition golang-migrate's sqlite driver creates.
-	if _, err := tx.ExecContext(ctx, `
+	return d.InTx(ctx, func(tx Querier) error {
+		var version int
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&version); err != nil {
+			return err
+		}
+		// Same table definition golang-migrate's sqlite driver creates.
+		if _, err := tx.ExecContext(ctx, `
 DROP TABLE schema_migrations;
 CREATE TABLE schema_migrations (version uint64, dirty bool);
 CREATE UNIQUE INDEX version_unique ON schema_migrations (version);`); err != nil {
-		return err
-	}
-	if version > 0 {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, dirty) VALUES (?, false)`, version); err != nil {
 			return err
 		}
-	}
-	return tx.Commit()
+		if version > 0 {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, dirty) VALUES (?, false)`, version); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // ExpectOne turns "no rows affected" into ErrNotFound. Pass it the results

@@ -53,6 +53,9 @@ export const formatCount = (n: number): string => number.format(n);
 /** "1 channel", "1,234 channels". */
 export const plural = (n: number, word: string): string => `${formatCount(n)} ${word}${n === 1 ? '' : 's'}`;
 
+/** A channel group's display name. */
+export const groupLabel = (name: string): string => name || 'Ungrouped';
+
 const relative = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
 
 export const timeAgo = (unixSeconds: number): string => {

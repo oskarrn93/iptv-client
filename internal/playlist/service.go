@@ -103,20 +103,27 @@ func (s *Service) Add(ctx context.Context, name, source string, progress func(in
 	if err != nil {
 		return Playlist{}, RefreshResult{}, err
 	}
-	res, err := s.Refresh(ctx, id, true, progress)
+	p, res, err := s.Refresh(ctx, id, true, progress)
 	if err != nil {
 		// Use a fresh context: ctx may be the reason we failed.
 		_ = s.Delete(context.Background(), id)
+	}
+	return p, res, err
+}
+
+// Refresh re-imports a playlist and returns it as updated. Unless force is
+// set, URL playlists cannot be refreshed more often than MinRefreshInterval.
+// progress, if non-nil, is called with the running entry count.
+func (s *Service) Refresh(ctx context.Context, id int64, force bool, progress func(int)) (Playlist, RefreshResult, error) {
+	res, err := s.refresh(ctx, id, force, progress)
+	if err != nil {
 		return Playlist{}, res, err
 	}
 	p, err := s.repo.Get(ctx, id)
 	return p, res, err
 }
 
-// Refresh re-imports a playlist. Unless force is set, URL playlists cannot be
-// refreshed more often than MinRefreshInterval. progress, if non-nil, is
-// called with the running entry count.
-func (s *Service) Refresh(ctx context.Context, id int64, force bool, progress func(int)) (RefreshResult, error) {
+func (s *Service) refresh(ctx context.Context, id int64, force bool, progress func(int)) (RefreshResult, error) {
 	p, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return RefreshResult{}, err
@@ -159,15 +166,18 @@ func (s *Service) Refresh(ctx context.Context, id int64, force bool, progress fu
 			if progress != nil && res.Imported%progressEvery == 0 {
 				progress(res.Imported)
 			}
-			return insert(channel.Input{
+			c := channel.Input{
 				Name:    e.Name,
 				URL:     e.URL,
 				Group:   e.Group,
 				TvgID:   e.TvgID,
 				TvgName: e.TvgName,
 				TvgLogo: e.TvgLogo,
-				Options: player.SanitizeOptions(e.Options),
-			})
+			}
+			if len(e.Options) > 0 { // most entries have none
+				c.Options = player.SanitizeOptions(e.Options)
+			}
+			return insert(c)
 		})
 		if err != nil && !errors.Is(err, m3u.ErrEmpty) {
 			return err
@@ -202,7 +212,7 @@ func (s *Service) replaceChannels(ctx context.Context, playlistID int64, etag, l
 	produce func(insert func(channel.Input) error) error) error {
 
 	return s.db.InTx(ctx, func(tx database.Querier) error {
-		playlists, channels := NewRepository(tx), channel.NewRepository(tx)
+		playlists := NewRepository(tx)
 		exists, err := playlists.Exists(ctx, playlistID)
 		if err != nil {
 			return err
@@ -210,25 +220,11 @@ func (s *Service) replaceChannels(ctx context.Context, playlistID int64, etag, l
 		if !exists {
 			return fmt.Errorf("playlist %d: %w", playlistID, database.ErrNotFound)
 		}
-		if err := channels.DeleteAllInPlaylist(ctx, playlistID); err != nil {
-			return err
-		}
-		inserter, err := channels.NewInserter(ctx, playlistID)
+		n, err := channel.NewRepository(tx).ReplaceAllInPlaylist(ctx, playlistID, produce)
 		if err != nil {
 			return err
 		}
-		defer inserter.Close()
-		insert := func(c channel.Input) error { return inserter.Insert(ctx, c) }
-		if err := produce(insert); err != nil {
-			return err
-		}
-		if err := inserter.Flush(ctx); err != nil {
-			return err
-		}
-		if err := channels.IndexAllInPlaylist(ctx, playlistID); err != nil {
-			return err
-		}
-		return playlists.SaveRefresh(ctx, playlistID, inserter.Count(), etag, lastModified, s.Now())
+		return playlists.SaveRefresh(ctx, playlistID, n, etag, lastModified, s.Now())
 	})
 }
 

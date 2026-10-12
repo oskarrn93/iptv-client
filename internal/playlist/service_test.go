@@ -139,7 +139,7 @@ func TestRefreshPolicy(t *testing.T) {
 	stored, _ := svc.Playlists.Get(ctx, p.ID)
 	now = stored.LastRefreshedAt.Add(10 * time.Minute)
 
-	_, err = svc.Playlists.Refresh(ctx, p.ID, false, nil)
+	_, _, err = svc.Playlists.Refresh(ctx, p.ID, false, nil)
 	var tooSoon *TooSoonError
 	if !errors.As(err, &tooSoon) || tooSoon.Remaining != 50*time.Minute {
 		t.Fatalf("err = %v, want TooSoonError(50m)", err)
@@ -147,7 +147,7 @@ func TestRefreshPolicy(t *testing.T) {
 	hits := srv.hits.Load()
 
 	// Forced refresh goes through; unchanged ETag means 304 and no rewrite.
-	res, err := svc.Playlists.Refresh(ctx, p.ID, true, nil)
+	_, res, err := svc.Playlists.Refresh(ctx, p.ID, true, nil)
 	if err != nil || !res.NotModified {
 		t.Fatalf("forced refresh = %+v, %v", res, err)
 	}
@@ -159,7 +159,7 @@ func TestRefreshPolicy(t *testing.T) {
 	now = now.Add(2 * time.Hour)
 	srv.etag.Store(`"2"`)
 	srv.body.Store("#EXTM3U\n#EXTINF:-1,Only\nhttp://example.com/only\n")
-	if res, err = svc.Playlists.Refresh(ctx, p.ID, false, nil); err != nil || res.Imported != 1 {
+	if _, res, err = svc.Playlists.Refresh(ctx, p.ID, false, nil); err != nil || res.Imported != 1 {
 		t.Fatalf("refresh = %+v, %v", res, err)
 	}
 	if cs := allChannels(t, svc, p.ID); len(cs) != 1 || cs[0].Name != "Only" {
@@ -178,7 +178,7 @@ func TestRefreshKeepsOldDataOnBadContent(t *testing.T) {
 	for i, body := range []string{"<html>Account expired</html>", "#EXTM3U\n", "#EXTM3U\n#EXTINF:-1,x\n--evil\n"} {
 		srv.etag.Store(`"bad` + string(rune('0'+i)) + `"`)
 		srv.body.Store(body)
-		if _, err := svc.Playlists.Refresh(ctx, p.ID, true, nil); !errors.Is(err, ErrNoChannels) {
+		if _, _, err := svc.Playlists.Refresh(ctx, p.ID, true, nil); !errors.Is(err, ErrNoChannels) {
 			t.Errorf("body %q: err = %v, want ErrNoChannels", body, err)
 		}
 		if cs := allChannels(t, svc, p.ID); len(cs) != 2 {
@@ -234,7 +234,7 @@ func TestFileSourceAndUserAgent(t *testing.T) {
 		t.Fatalf("add = %+v %+v %v", p, res, err)
 	}
 	// File playlists have no refresh rate limit.
-	if _, err := svc.Playlists.Refresh(ctx, p.ID, false, nil); err != nil {
+	if _, _, err := svc.Playlists.Refresh(ctx, p.ID, false, nil); err != nil {
 		t.Errorf("file refresh: %v", err)
 	}
 

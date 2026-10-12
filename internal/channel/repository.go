@@ -253,10 +253,33 @@ func (r *Repository) DeleteAllInPlaylist(ctx context.Context, playlistID int64) 
 	return err
 }
 
-// IndexAllInPlaylist adds a playlist's channels to the search index. Call it
+// ReplaceAllInPlaylist replaces a playlist's channels with the ones produce
+// passes to insert, in that order, and returns how many there are. Run it
+// inside a transaction: if it fails, rolling back keeps the old channels.
+func (r *Repository) ReplaceAllInPlaylist(ctx context.Context, playlistID int64,
+	produce func(insert func(Input) error) error) (int, error) {
+
+	if err := r.DeleteAllInPlaylist(ctx, playlistID); err != nil {
+		return 0, err
+	}
+	ins, err := r.newInserter(ctx, playlistID)
+	if err != nil {
+		return 0, err
+	}
+	defer ins.Close()
+	if err := produce(func(c Input) error { return ins.Insert(ctx, c) }); err != nil {
+		return 0, err
+	}
+	if err := ins.Flush(ctx); err != nil {
+		return 0, err
+	}
+	return ins.Count(), r.indexAllInPlaylist(ctx, playlistID)
+}
+
+// indexAllInPlaylist adds a playlist's channels to the search index. Call it
 // once after inserting them all: one bulk insert is much faster than
 // indexing row by row.
-func (r *Repository) IndexAllInPlaylist(ctx context.Context, playlistID int64) error {
+func (r *Repository) indexAllInPlaylist(ctx context.Context, playlistID int64) error {
 	_, err := r.q.ExecContext(ctx, `
 		INSERT INTO channels_fts (rowid, name, group_title)
 		SELECT id, name, group_title
@@ -268,10 +291,10 @@ func (r *Repository) IndexAllInPlaylist(ctx context.Context, playlistID int64) e
 // insertBatch is the number of channels written per INSERT.
 const insertBatch = 1000
 
-// Inserter appends channels to one playlist, in the order given.
+// inserter appends channels to one playlist, in the order given.
 // Rows are buffered and written insertBatch at a time; call Flush after the
 // last Insert and Close when done.
-type Inserter struct {
+type inserter struct {
 	stmt       *sql.Stmt
 	playlistID int64
 	buf        []channelRow
@@ -291,13 +314,13 @@ type channelRow struct {
 	FavKey   string `json:"fav_key"`
 }
 
-// NewInserter prepares an Inserter for a playlist. New rows are not
-// searchable until IndexAllInPlaylist runs.
+// newInserter prepares an inserter for a playlist. New rows are not
+// searchable until indexAllInPlaylist runs.
 //
 // A batch is bound as a single JSON array and expanded with json_each, so
 // one fixed statement inserts any number of rows; a multi-row VALUES list
 // would need SQL built to the batch size.
-func (r *Repository) NewInserter(ctx context.Context, playlistID int64) (*Inserter, error) {
+func (r *Repository) newInserter(ctx context.Context, playlistID int64) (*inserter, error) {
 	stmt, err := r.q.PrepareContext(ctx, `
 		INSERT INTO channels
 			(playlist_id, position, name, url, group_title, tvg_id, tvg_name, tvg_logo, vlc_opts, fav_key)
@@ -316,11 +339,11 @@ func (r *Repository) NewInserter(ctx context.Context, playlistID int64) (*Insert
 	if err != nil {
 		return nil, err
 	}
-	return &Inserter{stmt: stmt, playlistID: playlistID, buf: make([]channelRow, 0, insertBatch)}, nil
+	return &inserter{stmt: stmt, playlistID: playlistID, buf: make([]channelRow, 0, insertBatch)}, nil
 }
 
 // Insert buffers one channel, writing the buffer when it is full.
-func (i *Inserter) Insert(ctx context.Context, c Input) error {
+func (i *inserter) Insert(ctx context.Context, c Input) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -351,7 +374,7 @@ func (i *Inserter) Insert(ctx context.Context, c Input) error {
 }
 
 // Flush writes any buffered channels.
-func (i *Inserter) Flush(ctx context.Context) error {
+func (i *inserter) Flush(ctx context.Context) error {
 	if len(i.buf) == 0 {
 		return nil
 	}
@@ -365,10 +388,10 @@ func (i *Inserter) Flush(ctx context.Context) error {
 }
 
 // Count is the number of channels inserted so far, including buffered ones.
-func (i *Inserter) Count() int { return i.count }
+func (i *inserter) Count() int { return i.count }
 
 // Close releases the prepared statement. Buffered rows are discarded.
-func (i *Inserter) Close() error { return i.stmt.Close() }
+func (i *inserter) Close() error { return i.stmt.Close() }
 
 // favKey identifies a channel for favorites. It deliberately excludes the
 // URL (which often embeds account credentials that change) and the group

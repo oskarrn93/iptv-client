@@ -40,29 +40,20 @@ func createPlaylist(t testing.TB, d *database.DB, name string) int64 {
 	return id
 }
 
-// replaceChannels mirrors what the playlist package does on a refresh.
+// replaceChannels stores cs as a playlist's channels, as a refresh does.
 func replaceChannels(t testing.TB, d *database.DB, playlistID int64, cs ...Input) {
 	t.Helper()
 	ctx := context.Background()
 	err := d.InTx(ctx, func(tx database.Querier) error {
-		r := NewRepository(tx)
-		if err := r.DeleteAllInPlaylist(ctx, playlistID); err != nil {
-			return err
-		}
-		ins, err := r.NewInserter(ctx, playlistID)
-		if err != nil {
-			return err
-		}
-		defer ins.Close()
-		for _, c := range cs {
-			if err := ins.Insert(ctx, c); err != nil {
-				return err
+		_, err := NewRepository(tx).ReplaceAllInPlaylist(ctx, playlistID, func(insert func(Input) error) error {
+			for _, c := range cs {
+				if err := insert(c); err != nil {
+					return err
+				}
 			}
-		}
-		if err := ins.Flush(ctx); err != nil {
-			return err
-		}
-		return r.IndexAllInPlaylist(ctx, playlistID)
+			return nil
+		})
+		return err
 	})
 	if err != nil {
 		t.Fatalf("replaceChannels: %v", err)

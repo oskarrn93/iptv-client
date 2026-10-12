@@ -147,22 +147,22 @@ func TestParseLineTooLong(t *testing.T) {
 
 func TestParseAttrs(t *testing.T) {
 	tests := []struct {
-		in       string
-		title    string
-		duration string
-		attrs    map[string]string
+		in    string
+		title string
+		attrs map[string]string
 	}{
-		{`-1,Simple`, "Simple", "-1", map[string]string{}},
-		{`-1 a="1" B="2",T`, "T", "-1", map[string]string{"a": "1", "b": "2"}},
-		{`a="x,y",Title, with comma`, "Title, with comma", "", map[string]string{"a": "x,y"}},
-		{`-1 a="unterminated,T`, "", "-1", map[string]string{"a": "unterminated,T"}},
-		{`-1 bare a=1,T`, "T", "-1", map[string]string{"a": "1"}},
-		{``, "", "", map[string]string{}},
+		{`-1,Simple`, "Simple", map[string]string{}},
+		{`-1 a="1" B="2",T`, "T", map[string]string{"a": "1", "b": "2"}},
+		{`a="x,y",Title, with comma`, "Title, with comma", map[string]string{"a": "x,y"}},
+		{`-1 a="unterminated,T`, "", map[string]string{"a": "unterminated,T"}},
+		{`-1 bare a=1,T`, "T", map[string]string{"a": "1"}},
+		{``, "", map[string]string{}},
 	}
 	for _, tt := range tests {
-		title, attrs, dur := parseAttrs(tt.in)
-		if title != tt.title || dur != tt.duration || !reflect.DeepEqual(attrs, tt.attrs) {
-			t.Errorf("parseAttrs(%q) = %q, %v, %q; want %q, %v, %q", tt.in, title, attrs, dur, tt.title, tt.attrs, tt.duration)
+		attrs := map[string]string{}
+		title := parseAttrs(tt.in, func(k, v string) { attrs[k] = v })
+		if title != tt.title || !reflect.DeepEqual(attrs, tt.attrs) {
+			t.Errorf("parseAttrs(%q) = %q, %v; want %q, %v", tt.in, title, attrs, tt.title, tt.attrs)
 		}
 	}
 }

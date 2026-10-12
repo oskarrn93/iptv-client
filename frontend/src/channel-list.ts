@@ -1,4 +1,4 @@
-import { append, h } from './dom';
+import { append, groupLabel, h } from './dom';
 import { Channels } from '../wailsjs/go/main/App';
 import type { main } from '../wailsjs/go/models';
 
@@ -30,7 +30,8 @@ export class ChannelList {
   #selected = -1;
   #showGroup = true;
   #frame = 0;
-  #drawn = ''; // "first:last" currently rendered; '' forces a redraw
+  #drawn = ''; // "first:last" currently rendered; '' forces a render
+  readonly #rows = new Map<number, HTMLElement>(); // drawn rows by index
   readonly #spacer = h('div', { class: 'channel-spacer' });
 
   constructor(
@@ -40,8 +41,8 @@ export class ChannelList {
     element.append(this.#spacer);
     element.addEventListener('scroll', () => this.#schedule(), { passive: true });
     element.addEventListener('keydown', (e) => this.#onKey(e));
-    // Delegated pointer handling: rows are recreated on every render, so
-    // listeners on the rows themselves would miss double-clicks.
+    // Delegated pointer handling: rows are recreated as they scroll into
+    // view or their data changes, so listeners on them would be lost.
     element.addEventListener('mousedown', (e) => {
       const index = this.#indexOf(e);
       if (index !== undefined) this.#select(index, false);
@@ -72,10 +73,6 @@ export class ChannelList {
     return this.#ids.length;
   }
 
-  get selected(): Channel | undefined {
-    return this.#cache.get(this.#ids[this.#selected]);
-  }
-
   /** Replaces the list contents. */
   setIds(ids: number[], { showGroup = true, keepScroll = false } = {}): void {
     this.#ids = ids;
@@ -84,18 +81,19 @@ export class ChannelList {
     this.#generation++;
     this.#showGroup = showGroup;
     if (!keepScroll) this.element.scrollTop = 0;
-    const selected = keepScroll ? this.#selected : 0;
-    this.#selected = ids.length ? Math.min(Math.max(selected, 0), ids.length - 1) : -1;
+    this.#selected = ids.length ? this.#clamp(keepScroll ? this.#selected : 0) : -1;
     this.#spacer.style.height = `${ids.length * ROW_HEIGHT}px`;
+    this.#rows.clear();
+    this.#spacer.replaceChildren();
     this.#drawn = '';
     this.#render();
   }
 
-  /** Updates one cached channel (e.g. after toggling favorite) and redraws. */
+  /** Updates one cached channel (e.g. after toggling favorite) and redraws its row. */
   update(channel: Channel): void {
     if (this.#cache.has(channel.id)) {
       this.#cache.set(channel.id, channel);
-      this.#redraw();
+      this.#rebuild((i) => this.#ids[i] === channel.id);
     }
   }
 
@@ -103,10 +101,22 @@ export class ChannelList {
     this.element.focus();
   }
 
-  /** Schedules a render that rebuilds the rows even if the range is unchanged. */
-  #redraw(): void {
-    this.#drawn = '';
-    this.#schedule();
+  #current(): Channel | undefined {
+    return this.#cache.get(this.#ids[this.#selected]);
+  }
+
+  #clamp(index: number): number {
+    return Math.min(Math.max(index, 0), this.#ids.length - 1);
+  }
+
+  /** Rebuilds the drawn rows whose index matches. */
+  #rebuild(matches: (index: number) => boolean): void {
+    for (const [i, row] of this.#rows) {
+      if (!matches(i)) continue;
+      const fresh = this.#row(i, this.#cache.get(this.#ids[i]));
+      row.replaceWith(fresh);
+      this.#rows.set(i, fresh);
+    }
   }
 
   #schedule(): void {
@@ -132,13 +142,29 @@ export class ChannelList {
     const range = `${first}:${last}`;
     if (range === this.#drawn) return; // scrolled by less than a row
     this.#drawn = range;
-    const rows: HTMLElement[] = [];
-    for (let i = first; i <= last; i++) {
-      const channel = this.#cache.get(this.#ids[i]);
-      if (!channel) void this.#load(Math.floor(i / CHUNK));
-      rows.push(this.#row(i, channel));
+    // Keep the rows still in range; build only those scrolled into view,
+    // keeping the DOM in index order for assistive technology.
+    for (const [i, row] of this.#rows) {
+      if (i < first || i > last) {
+        row.remove();
+        this.#rows.delete(i);
+      }
     }
-    this.#spacer.replaceChildren(...rows);
+    const top = this.#rows.size ? Math.min(...this.#rows.keys()) : Infinity;
+    const above: HTMLElement[] = [];
+    const below: HTMLElement[] = [];
+    const missing = new Set<number>(); // chunks to load
+    for (let i = first; i <= last; i++) {
+      if (this.#rows.has(i)) continue;
+      const channel = this.#cache.get(this.#ids[i]);
+      if (!channel) missing.add(Math.floor(i / CHUNK));
+      const row = this.#row(i, channel);
+      this.#rows.set(i, row);
+      (i < top ? above : below).push(row);
+    }
+    this.#spacer.prepend(...above);
+    this.#spacer.append(...below);
+    for (const chunk of missing) void this.#load(chunk);
   }
 
   #row(index: number, channel: Channel | undefined): HTMLElement {
@@ -169,7 +195,7 @@ export class ChannelList {
         channel.favorite ? '★' : '☆',
       ),
       h('span', { class: 'channel-name', title: channel.name }, channel.name),
-      this.#showGroup && h('span', { class: 'channel-group' }, channel.group || 'Ungrouped'),
+      this.#showGroup && h('span', { class: 'channel-group' }, groupLabel(channel.group)),
       h(
         'button',
         {
@@ -192,7 +218,7 @@ export class ChannelList {
       const channels = await Channels(this.#ids.slice(chunk * CHUNK, (chunk + 1) * CHUNK));
       if (generation !== this.#generation) return;
       for (const channel of channels) this.#cache.set(channel.id, channel);
-      this.#redraw();
+      this.#rebuild((i) => Math.floor(i / CHUNK) === chunk);
     } catch (error) {
       if (generation === this.#generation) this.events.onError(error);
     } finally {
@@ -211,7 +237,7 @@ export class ChannelList {
 
   #select(index: number, scroll = true): void {
     if (!this.#ids.length) return;
-    this.#selected = Math.min(Math.max(index, 0), this.#ids.length - 1);
+    this.#selected = this.#clamp(index);
     if (scroll) {
       const top = this.#selected * ROW_HEIGHT;
       const { scrollTop, clientHeight } = this.element;
@@ -244,7 +270,7 @@ export class ChannelList {
       this.#select(moves[e.key]);
       return;
     }
-    const channel = this.selected;
+    const channel = this.#current();
     if (!channel) return;
     if (e.key === 'Enter') {
       e.preventDefault();

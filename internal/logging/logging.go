@@ -114,22 +114,22 @@ func Dir() (string, error) {
 
 // Level names accepted by ParseLevel and returned by LevelName.
 const (
-	LevelDebug = "debug"
-	LevelInfo  = "info"
-	LevelWarn  = "warn"
-	LevelError = "error"
+	levelDebug = "debug"
+	levelInfo  = "info"
+	levelWarn  = "warn"
+	levelError = "error"
 )
 
 // ParseLevel parses one of the level names.
 func ParseLevel(s string) (slog.Level, error) {
 	switch s {
-	case LevelDebug:
+	case levelDebug:
 		return slog.LevelDebug, nil
-	case LevelInfo:
+	case levelInfo:
 		return slog.LevelInfo, nil
-	case LevelWarn:
+	case levelWarn:
 		return slog.LevelWarn, nil
-	case LevelError:
+	case levelError:
 		return slog.LevelError, nil
 	}
 	// Not echoed: the value can come from the UI and be of any size.
@@ -140,13 +140,13 @@ func ParseLevel(s string) (slog.Level, error) {
 func LevelName(level slog.Level) string {
 	switch {
 	case level >= slog.LevelError:
-		return LevelError
+		return levelError
 	case level >= slog.LevelWarn:
-		return LevelWarn
+		return levelWarn
 	case level >= slog.LevelInfo:
-		return LevelInfo
+		return levelInfo
 	}
-	return LevelDebug
+	return levelDebug
 }
 
 // --- context attributes ---

@@ -26,7 +26,7 @@ import type { main } from '../wailsjs/go/models';
 import { EventsOn } from '../wailsjs/runtime/runtime';
 import { ChannelList } from './channel-list';
 import { confirmDialog, promptDialog, showDialog } from './dialogs';
-import { $, type Child, debounce, errorMessage, formatCount, h, plural, timeAgo } from './dom';
+import { $, type Child, debounce, errorMessage, formatCount, groupLabel, h, plural, timeAgo } from './dom';
 import { installErrorHandlers, type Level } from './log';
 import { showMenu } from './menu';
 
@@ -127,7 +127,7 @@ const list = new ChannelList($('#channels'), {
 });
 
 const selectionLabel = (s: Selection): string =>
-  s.kind === 'all' ? 'All channels' : s.kind === 'favorites' ? 'Favorites' : s.name || 'Ungrouped';
+  s.kind === 'all' ? 'All channels' : s.kind === 'favorites' ? 'Favorites' : groupLabel(s.name);
 
 const loadChannels = async ({ keepScroll = false } = {}): Promise<void> => {
   const playlistId = state.playlistId;
@@ -200,25 +200,36 @@ const renderGroups = (): void => {
   }
   const total = state.groups.reduce((sum, g) => sum + g.count, 0);
   const current = selectionKey(state.selection);
-  const item = (selection: Selection, label: string, count?: number, extraClass = '') =>
-    listItem(
-      selectionKey(selection) === current,
+  const item = (selection: Selection, label: string, count?: number, extraClass = '') => {
+    const key = selectionKey(selection);
+    const li = listItem(
+      key === current,
       extraClass,
       () => void selectGroup(selection),
       h('span', { class: 'item-name', title: label }, label),
       count !== undefined && h('span', { class: 'item-count' }, formatCount(count)),
     );
+    li.dataset.key = key;
+    return li;
+  };
   ui.groups.replaceChildren(
     item({ kind: 'all' }, 'All channels', total, 'special'),
     item({ kind: 'favorites' }, '★ Favorites', undefined, 'special'),
     h('li', { class: 'separator', role: 'presentation' }),
-    ...state.groups.map((g) => item({ kind: 'group', name: g.name }, g.name || 'Ungrouped', g.count)),
+    ...state.groups.map((g) => item({ kind: 'group', name: g.name }, groupLabel(g.name), g.count)),
   );
 };
 
 const selectGroup = guard(async (selection: Selection) => {
   state.selection = selection;
-  renderGroups();
+  // Restyle rather than rebuild: a big provider can have thousands of groups.
+  const current = selectionKey(selection);
+  for (const li of ui.groups.querySelectorAll<HTMLElement>('li[data-key]')) {
+    const selected = li.dataset.key === current;
+    li.classList.toggle('selected', selected);
+    li.setAttribute('aria-selected', String(selected));
+    li.tabIndex = selected ? 0 : -1;
+  }
   await loadChannels();
 });
 
@@ -383,11 +394,12 @@ const refreshPlaylist = async (p: main.Playlist, force = false): Promise<void> =
     return;
   }
   setStatus(result.notModified ? `“${p.name}” is already up to date` : `Refreshed “${p.name}”: ${describeImport(result)}`);
-  await loadPlaylists();
-  if (state.playlistId === p.id && !result.notModified) {
-    // Channel IDs change on refresh, so reload everything for this playlist.
+  // Channel IDs change on refresh, so reload everything for this playlist.
+  const reload = state.playlistId === p.id && !result.notModified;
+  const [, groups] = await Promise.all([loadPlaylists(), reload ? ListGroups(p.id) : null]);
+  if (groups && state.playlistId === p.id) {
     const selection = state.selection;
-    state.groups = await ListGroups(p.id);
+    state.groups = groups;
     const stillExists = selection.kind !== 'group' || state.groups.some((g) => g.name === selection.name);
     state.selection = stillExists ? selection : { kind: 'all' };
     renderGroups();
@@ -585,7 +597,27 @@ const openSettings = async (): Promise<void> => {
 
 // ---------- wiring ----------
 
-const onSearch = debounce(guard(() => loadChannels()), 200);
+// One search query at a time: on a big playlist a query can outlast the
+// debounce, and starting another per keystroke only wastes work. Input that
+// arrives meanwhile is searched once the running query finishes.
+let searching = false;
+let searchAgain = false;
+const search = guard(async () => {
+  if (searching) {
+    searchAgain = true;
+    return;
+  }
+  searching = true;
+  try {
+    do {
+      searchAgain = false;
+      await loadChannels();
+    } while (searchAgain);
+  } finally {
+    searching = false;
+  }
+});
+const onSearch = debounce(search, 200);
 
 ui.search.addEventListener('input', () => {
   state.search = ui.search.value.trim();

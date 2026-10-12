@@ -20,7 +20,7 @@ import (
 	"iptv-client/internal/logging"
 	"iptv-client/internal/player"
 	"iptv-client/internal/playlist"
-	"iptv-client/internal/setting"
+	"iptv-client/internal/services"
 	"iptv-client/internal/update"
 )
 
@@ -31,7 +31,7 @@ import (
 type App struct {
 	ctx     context.Context
 	db      *database.DB
-	svc     *services
+	svc     *services.Services
 	initErr error
 
 	log      *slog.Logger
@@ -40,22 +40,6 @@ type App struct {
 	uiLog    *logging.UI
 	imports  importGuard
 	updater  *update.Updater
-}
-
-// services are the domain services the bound methods call.
-type services struct {
-	playlists *playlist.Service
-	channels  *channel.Service
-	settings  *setting.Service
-}
-
-func newServices(db *database.DB) *services {
-	settings := setting.NewService(db)
-	return &services{
-		playlists: playlist.NewService(db, settings),
-		channels:  channel.NewService(db, settings),
-		settings:  settings,
-	}
 }
 
 // NewApp creates the application. It logs to log, whose level is
@@ -82,7 +66,7 @@ func (a *App) startup(ctx context.Context) {
 		var db *database.DB
 		if db, err = database.Open(ctx, path); err == nil {
 			a.db = db
-			a.svc = newServices(db)
+			a.svc = services.New(db)
 			a.started(ctx)
 			return
 		}
@@ -93,14 +77,14 @@ func (a *App) startup(ctx context.Context) {
 
 // started applies the saved log level and logs the player in use.
 func (a *App) started(ctx context.Context) {
-	if level, err := a.svc.settings.LogLevel(ctx); err == nil {
+	if level, err := a.svc.Settings.LogLevel(ctx); err == nil {
 		a.logLevel.Set(level)
 	}
 	a.log.InfoContext(ctx, "database open", "log_level", logging.LevelName(a.logLevel.Level()))
 	// Finding the player reads the registry and searches folders; don't
 	// hold up the window for a log line.
 	go func() {
-		if s, err := a.svc.settings.Get(ctx); err == nil {
+		if s, err := a.svc.Settings.Get(ctx); err == nil {
 			a.log.InfoContext(ctx, "player", "name", s.PlayerName, "chosen", s.PlayerOverride, "found", s.PlayerError == nil)
 		}
 	}()
@@ -114,7 +98,7 @@ func (a *App) shutdown(ctx context.Context) {
 }
 
 // ready returns the services or the startup error.
-func (a *App) ready() (*services, error) {
+func (a *App) ready() (*services.Services, error) {
 	if a.initErr != nil {
 		return nil, a.initErr
 	}
@@ -229,7 +213,7 @@ func (a *App) ListPlaylists() (_ []Playlist, err error) {
 	if err != nil {
 		return nil, err
 	}
-	ps, err := svc.playlists.List(ctx)
+	ps, err := svc.Playlists.List(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -261,32 +245,31 @@ func (a *App) AddPlaylistFile(name string) (ImportResult, error) {
 	return a.add(name, path, playlist.SourceFile)
 }
 
-func (a *App) add(name, source string, typ playlist.SourceType) (_ ImportResult, err error) {
-	ctx, end := a.call("add_playlist", slog.String("source_type", string(typ)))
-	defer end(&err)
-	svc, err := a.ready()
-	if err != nil {
-		return ImportResult{}, err
-	}
-	ctx, done, err := a.imports.begin(ctx)
-	if err != nil {
-		return ImportResult{}, err
-	}
-	defer done()
-	finished := a.importStarted(ctx)
-	p, res, err := svc.playlists.Add(ctx, name, source, a.progress)
-	if err != nil {
-		return ImportResult{}, importError(err)
-	}
-	finished(res, "playlist_id", p.ID)
-	dto := toPlaylist(p)
-	return ImportResult{Playlist: &dto, Imported: res.Imported, Skipped: res.Skipped}, nil
+func (a *App) add(name, source string, typ playlist.SourceType) (ImportResult, error) {
+	return a.runImport("add_playlist", 0, []slog.Attr{slog.String("source_type", string(typ))},
+		func(ctx context.Context, svc *services.Services) (playlist.Playlist, playlist.RefreshResult, error) {
+			return svc.Playlists.Add(ctx, name, source, a.progress)
+		})
 }
 
 // RefreshPlaylist re-imports a playlist. Without force, URL playlists are
 // rate limited and TooSoonMinutes is set instead of returning an error.
-func (a *App) RefreshPlaylist(id int64, force bool) (_ ImportResult, err error) {
-	ctx, end := a.call("refresh_playlist", slog.Int64("playlist_id", id), slog.Bool("force", force))
+func (a *App) RefreshPlaylist(id int64, force bool) (ImportResult, error) {
+	return a.runImport("refresh_playlist", id, []slog.Attr{slog.Bool("force", force)},
+		func(ctx context.Context, svc *services.Services) (playlist.Playlist, playlist.RefreshResult, error) {
+			return svc.Playlists.Refresh(ctx, id, force, a.progress)
+		})
+}
+
+// runImport runs an add (id 0) or a refresh of playlist id under the import
+// guard, logs its start and result, and builds the result for the UI.
+func (a *App) runImport(op string, id int64, attrs []slog.Attr,
+	run func(context.Context, *services.Services) (playlist.Playlist, playlist.RefreshResult, error)) (_ ImportResult, err error) {
+
+	if id != 0 {
+		attrs = append([]slog.Attr{slog.Int64("playlist_id", id)}, attrs...)
+	}
+	ctx, end := a.call(op, attrs...)
 	defer end(&err)
 	svc, err := a.ready()
 	if err != nil {
@@ -297,8 +280,9 @@ func (a *App) RefreshPlaylist(id int64, force bool) (_ ImportResult, err error) 
 		return ImportResult{}, err
 	}
 	defer done()
-	finished := a.importStarted(ctx)
-	res, err := svc.playlists.Refresh(ctx, id, force, a.progress)
+	start := time.Now()
+	a.log.InfoContext(ctx, "import started")
+	p, res, err := run(ctx, svc)
 	var tooSoon *playlist.TooSoonError
 	if errors.As(err, &tooSoon) {
 		a.log.InfoContext(ctx, "refresh refused: too soon", "wait_minutes", tooSoon.Minutes())
@@ -307,11 +291,12 @@ func (a *App) RefreshPlaylist(id int64, force bool) (_ ImportResult, err error) 
 	if err != nil {
 		return ImportResult{Skipped: res.Skipped}, importError(err)
 	}
-	finished(res, "not_modified", res.NotModified)
-	p, err := svc.playlists.Get(ctx, id)
-	if err != nil {
-		return ImportResult{}, err
+	logAttrs := []any{"imported", res.Imported, "skipped", res.Skipped, "hls", res.HLS,
+		"not_modified", res.NotModified, "took", time.Since(start).Round(time.Millisecond)}
+	if id == 0 {
+		logAttrs = append(logAttrs, "playlist_id", p.ID)
 	}
+	a.log.InfoContext(ctx, "import finished", logAttrs...)
 	dto := toPlaylist(p)
 	return ImportResult{Playlist: &dto, Imported: res.Imported, Skipped: res.Skipped, NotModified: res.NotModified}, nil
 }
@@ -330,7 +315,7 @@ func (a *App) RenamePlaylist(id int64, name string) (err error) {
 	if err != nil {
 		return err
 	}
-	return svc.playlists.Rename(ctx, id, name)
+	return svc.Playlists.Rename(ctx, id, name)
 }
 
 // DeletePlaylist removes a playlist and its favorites.
@@ -341,7 +326,7 @@ func (a *App) DeletePlaylist(id int64) (err error) {
 	if err != nil {
 		return err
 	}
-	if err := svc.playlists.Delete(ctx, id); err != nil {
+	if err := svc.Playlists.Delete(ctx, id); err != nil {
 		return err
 	}
 	a.log.InfoContext(ctx, "playlist deleted")
@@ -358,7 +343,7 @@ func (a *App) ListGroups(playlistID int64) (_ []Group, err error) {
 	if err != nil {
 		return nil, err
 	}
-	gs, err := svc.channels.Groups(ctx, playlistID)
+	gs, err := svc.Channels.Groups(ctx, playlistID)
 	if err != nil {
 		return nil, err
 	}
@@ -382,7 +367,7 @@ func (a *App) ChannelIDs(q ChannelQuery) (_ []int64, err error) {
 	if !q.AllGroups {
 		f.Group = &q.Group
 	}
-	return svc.channels.IDs(ctx, f)
+	return svc.Channels.IDs(ctx, f)
 }
 
 // Channels returns the rows for ids, in the order given.
@@ -393,7 +378,7 @@ func (a *App) Channels(ids []int64) (_ []Channel, err error) {
 	if err != nil {
 		return nil, err
 	}
-	cs, err := svc.channels.ByIDs(ctx, ids)
+	cs, err := svc.Channels.ByIDs(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -412,7 +397,7 @@ func (a *App) SetFavorite(channelID int64, favorite bool) (err error) {
 	if err != nil {
 		return err
 	}
-	return svc.channels.SetFavorite(ctx, channelID, favorite)
+	return svc.Channels.SetFavorite(ctx, channelID, favorite)
 }
 
 // Play opens a channel in the configured player and returns its name.
@@ -423,7 +408,7 @@ func (a *App) Play(channelID int64) (_ string, err error) {
 	if err != nil {
 		return "", err
 	}
-	name, err := svc.channels.Play(ctx, channelID)
+	name, err := svc.Channels.Play(ctx, channelID)
 	if err != nil {
 		return "", err
 	}
@@ -441,7 +426,7 @@ func (a *App) CopyStreamURL(channelID int64) (err error) {
 	if err != nil {
 		return err
 	}
-	url, err := svc.channels.StreamURL(ctx, channelID)
+	url, err := svc.Channels.StreamURL(ctx, channelID)
 	if err != nil {
 		return err
 	}
@@ -463,8 +448,8 @@ func (a *App) GetSettings() (_ Settings, err error) {
 
 // settings builds the Settings DTO. Bound methods use it rather than
 // calling GetSettings, which would log a failure twice under another op.
-func (a *App) settings(ctx context.Context, svc *services) (Settings, error) {
-	ls, err := svc.settings.Get(ctx)
+func (a *App) settings(ctx context.Context, svc *services.Services) (Settings, error) {
+	ls, err := svc.Settings.Get(ctx)
 	if err != nil {
 		return Settings{}, err
 	}
@@ -502,7 +487,7 @@ func (a *App) ChoosePlayer() (_ Settings, err error) {
 		return Settings{}, err
 	}
 	if path != "" {
-		if err := svc.settings.SetPlayerPath(ctx, path); err != nil {
+		if err := svc.Settings.SetPlayerPath(ctx, path); err != nil {
 			return Settings{}, err
 		}
 	}
@@ -521,7 +506,7 @@ func (a *App) ResetPlayer() (_ Settings, err error) {
 	if err != nil {
 		return Settings{}, err
 	}
-	if err := svc.settings.SetPlayerPath(ctx, ""); err != nil {
+	if err := svc.Settings.SetPlayerPath(ctx, ""); err != nil {
 		return Settings{}, err
 	}
 	a.log.InfoContext(ctx, "player reset to auto-detect")
@@ -536,7 +521,7 @@ func (a *App) SetUserAgent(ua string) (err error) {
 	if err != nil {
 		return err
 	}
-	if err := svc.settings.SetUserAgent(ctx, ua); err != nil {
+	if err := svc.Settings.SetUserAgent(ctx, ua); err != nil {
 		return err
 	}
 	// Never the value: a custom User-Agent can identify the account.
@@ -557,7 +542,7 @@ func (a *App) SetLogLevel(level string) (err error) {
 		return err
 	}
 	if svc, err := a.ready(); err == nil {
-		if err := svc.settings.SetLogLevel(ctx, l); err != nil {
+		if err := svc.Settings.SetLogLevel(ctx, l); err != nil {
 			return err
 		}
 	}
@@ -639,28 +624,13 @@ func (a *App) InstallUpdate() (err error) {
 func (a *App) progress(n int) { runtime.EventsEmit(a.ctx, ImportProgressEvent, n) }
 
 func toPlaylist(p playlist.Playlist) Playlist {
-	src := p.Source
-	if p.SourceType == playlist.SourceURL {
-		src = fetch.Redact(src)
-	}
 	var refreshed int64
 	if !p.LastRefreshedAt.IsZero() {
 		refreshed = p.LastRefreshedAt.Unix()
 	}
 	return Playlist{
-		ID: p.ID, Name: p.Name, SourceType: string(p.SourceType), Source: src,
+		ID: p.ID, Name: p.Name, SourceType: string(p.SourceType), Source: p.DisplaySource(),
 		ChannelCount: p.ChannelCount, LastRefreshedAt: refreshed,
-	}
-}
-
-// importStarted logs the start of an import and returns a func that logs
-// its result and duration.
-func (a *App) importStarted(ctx context.Context) func(res playlist.RefreshResult, attrs ...any) {
-	start := time.Now()
-	a.log.InfoContext(ctx, "import started")
-	return func(res playlist.RefreshResult, attrs ...any) {
-		a.log.InfoContext(ctx, "import finished", append([]any{"imported", res.Imported, "skipped", res.Skipped,
-			"hls", res.HLS, "took", time.Since(start).Round(time.Millisecond)}, attrs...)...)
 	}
 }
 
@@ -681,8 +651,6 @@ func importError(err error) error {
 		return uiError{"import cancelled; the previous channel list was kept", err}
 	case errors.Is(err, context.DeadlineExceeded):
 		return uiError{"import timed out; the previous channel list was kept", err}
-	case errors.Is(err, fetch.ErrTooLarge):
-		return fmt.Errorf("%w (limit %d MB)", err, fetch.DefaultMaxBytes>>20)
 	}
 	return err
 }

@@ -17,6 +17,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/charmap"
 )
 
@@ -64,15 +65,16 @@ func Parse(r io.Reader, fn func(Entry) error) (Result, error) {
 	sc.Buffer(make([]byte, 64*1024), MaxLineLength)
 
 	var (
-		pending   *Entry // set by #EXTINF, completed by the URL line
+		pending   Entry  // set by #EXTINF, completed by the URL line
 		extGroup  string // last #EXTGRP value; applies until the next entry
 		opts      map[string]string
 		firstLine = true
 		sawNonHLS bool
+		latin1    = charmap.Windows1252.NewDecoder()
 	)
 
 	for sc.Scan() {
-		line := decodeLine(sc.Bytes())
+		line := decodeLine(sc.Bytes(), latin1)
 		if firstLine {
 			line = strings.TrimPrefix(line, bom)
 			firstLine = false
@@ -86,14 +88,10 @@ func Parse(r io.Reader, fn func(Entry) error) (Result, error) {
 			tag, value := splitTag(line)
 			switch strings.ToUpper(tag) {
 			case "#EXTM3U":
-				_, attrs, _ := parseAttrs(value)
-				for k, v := range attrs {
-					res.Header[k] = v
-				}
+				parseAttrs(value, func(k, v string) { res.Header[k] = v })
 			case "#EXTINF":
 				sawNonHLS = true
-				e := parseExtinf(value)
-				pending = &e
+				pending = parseExtinf(value)
 			case "#EXTGRP":
 				extGroup = strings.TrimSpace(value)
 			case "#EXTVLCOPT":
@@ -117,10 +115,7 @@ func Parse(r io.Reader, fn func(Entry) error) (Result, error) {
 
 		// A non-comment line is a URL that completes the current entry.
 		sawNonHLS = true
-		e := Entry{}
-		if pending != nil {
-			e = *pending
-		}
+		e := pending
 		e.URL = line
 		if e.Group == "" {
 			e.Group = extGroup
@@ -133,7 +128,7 @@ func Parse(r io.Reader, fn func(Entry) error) (Result, error) {
 		}
 		e.Options = opts
 
-		pending, opts, extGroup = nil, nil, ""
+		pending, opts, extGroup = Entry{}, nil, ""
 		res.Entries++
 		if err := fn(e); err != nil {
 			return res, err
@@ -163,12 +158,12 @@ func splitTag(line string) (tag, value string) {
 }
 
 // decodeLine returns the line as a string, treating invalid UTF-8 as
-// Windows-1252 (the usual encoding of non-UTF-8 playlists).
-func decodeLine(b []byte) string {
+// Windows-1252 (the usual encoding of non-UTF-8 playlists) using latin1.
+func decodeLine(b []byte, latin1 *encoding.Decoder) string {
 	if utf8.Valid(b) {
 		return string(b)
 	}
-	s, err := charmap.Windows1252.NewDecoder().Bytes(b)
+	s, err := latin1.Bytes(b)
 	if err != nil {
 		return strings.ToValidUTF8(string(b), "�")
 	}
@@ -179,21 +174,28 @@ func decodeLine(b []byte) string {
 //
 //	-1 tvg-id="x" group-title="News",Channel Name
 func parseExtinf(s string) Entry {
-	title, attrs, _ := parseAttrs(s)
-	return Entry{
-		Name:    strings.TrimSpace(title),
-		Group:   strings.TrimSpace(attrs["group-title"]),
-		TvgID:   strings.TrimSpace(attrs["tvg-id"]),
-		TvgName: strings.TrimSpace(attrs["tvg-name"]),
-		TvgLogo: strings.TrimSpace(attrs["tvg-logo"]),
-	}
+	var e Entry
+	title := parseAttrs(s, func(k, v string) {
+		switch k {
+		case "group-title":
+			e.Group = strings.TrimSpace(v)
+		case "tvg-id":
+			e.TvgID = strings.TrimSpace(v)
+		case "tvg-name":
+			e.TvgName = strings.TrimSpace(v)
+		case "tvg-logo":
+			e.TvgLogo = strings.TrimSpace(v)
+		}
+	})
+	e.Name = strings.TrimSpace(title)
+	return e
 }
 
-// parseAttrs scans `duration key="value" key=value ...,title`. It returns the
-// title (text after the first comma outside quotes), the attributes with
-// lowercased keys, and the leading duration token.
-func parseAttrs(s string) (title string, attrs map[string]string, duration string) {
-	attrs = map[string]string{}
+// parseAttrs scans `duration key="value" key=value ...,title`, skipping the
+// leading duration token. It calls attr for each attribute, with the key
+// lowercased, and returns the title (text after the first comma outside
+// quotes).
+func parseAttrs(s string, attr func(key, val string)) (title string) {
 	i, n := 0, len(s)
 
 	skipSpace := func() {
@@ -210,8 +212,6 @@ func parseAttrs(s string) (title string, attrs map[string]string, duration strin
 	}
 	if i < n && s[i] == '=' {
 		i = start // no duration; first token is an attribute
-	} else {
-		duration = s[start:i]
 	}
 
 	for i < n {
@@ -220,7 +220,7 @@ func parseAttrs(s string) (title string, attrs map[string]string, duration strin
 			break
 		}
 		if s[i] == ',' {
-			return s[i+1:], attrs, duration
+			return s[i+1:]
 		}
 		// Key.
 		ks := i
@@ -253,8 +253,8 @@ func parseAttrs(s string) (title string, attrs map[string]string, duration strin
 			val = s[vs:i]
 		}
 		if key != "" {
-			attrs[key] = val
+			attr(key, val)
 		}
 	}
-	return "", attrs, duration
+	return ""
 }

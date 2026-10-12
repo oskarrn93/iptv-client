@@ -1,6 +1,6 @@
 // Package channel browses a playlist's channels, manages favorites and
 // starts playback. It also stores the channels a playlist import produces;
-// see Repository.NewInserter.
+// see Repository.ReplaceAllInPlaylist.
 package channel
 
 // Channel is one playable entry. Repository.ListByIDs fills only the list

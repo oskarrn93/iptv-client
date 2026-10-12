@@ -17,7 +17,7 @@ Create a migration named `$ARGUMENTS`.
    Start each with a short `--` comment saying why, like the existing ones.
 3. Write SQLite that `modernc.org/sqlite` accepts. Remember:
    - `channels` has an FTS index, `channels_fts`, maintained in bulk from Go
-     (`DeleteAllInPlaylist` / `IndexAllInPlaylist` in
+     (`DeleteAllInPlaylist` / `indexAllInPlaylist` in
      `internal/channel/repository.go`), so schema changes to `channels` may
      need matching changes there.
    - Migrations are embedded and run on every `database.Open`; they must be
