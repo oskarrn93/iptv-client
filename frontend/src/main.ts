@@ -26,7 +26,7 @@ import type { main } from '../wailsjs/go/models';
 import { EventsOn } from '../wailsjs/runtime/runtime';
 import { ChannelList } from './channel-list';
 import { confirmDialog, promptDialog, showDialog } from './dialogs';
-import { $, type Child, debounce, errorMessage, formatCount, groupLabel, h, plural, timeAgo } from './dom';
+import { $, type Child, debounce, errorMessage, formatCount, groupLabel, h, plural, setSelected, timeAgo } from './dom';
 import { installErrorHandlers, type Level } from './log';
 import { showMenu } from './menu';
 
@@ -175,19 +175,20 @@ const renderEmpty = (): void => {
 };
 
 /** A selectable listbox option with a roving tabindex. */
-const listItem = (selected: boolean, extraClass: string, onActivate: () => void, ...children: Child[]): HTMLLIElement =>
-  h(
+const listItem = (selected: boolean, extraClass: string, onActivate: () => void, ...children: Child[]): HTMLLIElement => {
+  const li = h(
     'li',
     {
-      class: `list-item ${extraClass}${selected ? ' selected' : ''}`,
+      class: `list-item ${extraClass}`,
       role: 'option',
-      'aria-selected': String(selected),
-      tabindex: selected ? 0 : -1,
       onclick: onActivate,
       onkeydown: (e: KeyboardEvent) => e.key === 'Enter' && onActivate(),
     },
     ...children,
   );
+  setSelected(li, selected, true);
+  return li;
+};
 
 // ---------- groups ----------
 
@@ -225,10 +226,7 @@ const selectGroup = guard(async (selection: Selection) => {
   // Restyle rather than rebuild: a big provider can have thousands of groups.
   const current = selectionKey(selection);
   for (const li of ui.groups.querySelectorAll<HTMLElement>('li[data-key]')) {
-    const selected = li.dataset.key === current;
-    li.classList.toggle('selected', selected);
-    li.setAttribute('aria-selected', String(selected));
-    li.tabIndex = selected ? 0 : -1;
+    setSelected(li, li.dataset.key === current, true);
   }
   await loadChannels();
 });
@@ -599,24 +597,26 @@ const openSettings = async (): Promise<void> => {
 
 // One search query at a time: on a big playlist a query can outlast the
 // debounce, and starting another per keystroke only wastes work. Input that
-// arrives meanwhile is searched once the running query finishes.
+// arrives meanwhile is searched once the running query finishes, even if
+// that query failed.
 let searching = false;
 let searchAgain = false;
-const search = guard(async () => {
+const search = async (): Promise<void> => {
   if (searching) {
     searchAgain = true;
     return;
   }
   searching = true;
-  try {
-    do {
-      searchAgain = false;
+  do {
+    searchAgain = false;
+    try {
       await loadChannels();
-    } while (searchAgain);
-  } finally {
-    searching = false;
-  }
-});
+    } catch (error) {
+      fail(error);
+    }
+  } while (searchAgain);
+  searching = false;
+};
 const onSearch = debounce(search, 200);
 
 ui.search.addEventListener('input', () => {

@@ -40,6 +40,13 @@ export const append = (parent: Node, ...children: Child[]): void => {
   }
 };
 
+/** Marks a listbox option (de)selected; roving also moves the tab stop to it. */
+export const setSelected = (el: HTMLElement, selected: boolean, roving = false): void => {
+  el.classList.toggle('selected', selected);
+  el.setAttribute('aria-selected', String(selected));
+  if (roving) el.tabIndex = selected ? 0 : -1;
+};
+
 export const $ = <T extends HTMLElement = HTMLElement>(selector: string): T => {
   const el = document.querySelector<T>(selector);
   if (!el) throw new Error(`missing element ${selector}`);

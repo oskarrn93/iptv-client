@@ -103,27 +103,21 @@ func (s *Service) Add(ctx context.Context, name, source string, progress func(in
 	if err != nil {
 		return Playlist{}, RefreshResult{}, err
 	}
-	p, res, err := s.Refresh(ctx, id, true, progress)
+	res, err := s.Refresh(ctx, id, true, progress)
 	if err != nil {
 		// Use a fresh context: ctx may be the reason we failed.
 		_ = s.Delete(context.Background(), id)
+		return Playlist{}, RefreshResult{}, err
 	}
+	// The import has committed: a cancel arriving now must not fail it.
+	p, err := s.repo.Get(context.WithoutCancel(ctx), id)
 	return p, res, err
 }
 
-// Refresh re-imports a playlist and returns it as updated. Unless force is
-// set, URL playlists cannot be refreshed more often than MinRefreshInterval.
-// progress, if non-nil, is called with the running entry count.
-func (s *Service) Refresh(ctx context.Context, id int64, force bool, progress func(int)) (Playlist, RefreshResult, error) {
-	res, err := s.refresh(ctx, id, force, progress)
-	if err != nil {
-		return Playlist{}, res, err
-	}
-	p, err := s.repo.Get(ctx, id)
-	return p, res, err
-}
-
-func (s *Service) refresh(ctx context.Context, id int64, force bool, progress func(int)) (RefreshResult, error) {
+// Refresh re-imports a playlist. Unless force is set, URL playlists cannot be
+// refreshed more often than MinRefreshInterval. progress, if non-nil, is
+// called with the running entry count.
+func (s *Service) Refresh(ctx context.Context, id int64, force bool, progress func(int)) (RefreshResult, error) {
 	p, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return RefreshResult{}, err
@@ -166,18 +160,15 @@ func (s *Service) refresh(ctx context.Context, id int64, force bool, progress fu
 			if progress != nil && res.Imported%progressEvery == 0 {
 				progress(res.Imported)
 			}
-			c := channel.Input{
+			return insert(channel.Input{
 				Name:    e.Name,
 				URL:     e.URL,
 				Group:   e.Group,
 				TvgID:   e.TvgID,
 				TvgName: e.TvgName,
 				TvgLogo: e.TvgLogo,
-			}
-			if len(e.Options) > 0 { // most entries have none
-				c.Options = player.SanitizeOptions(e.Options)
-			}
-			return insert(c)
+				Options: player.SanitizeOptions(e.Options),
+			})
 		})
 		if err != nil && !errors.Is(err, m3u.ErrEmpty) {
 			return err

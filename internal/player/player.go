@@ -70,6 +70,9 @@ func ValidateURL(s string) error {
 // SanitizeOptions returns only the allowlisted options with valid values.
 // Keys are lowercased. It never returns nil.
 func SanitizeOptions(opts map[string]string) map[string]string {
+	if len(opts) == 0 { // most channels have none
+		return nil
+	}
 	out := map[string]string{}
 	for k, v := range opts {
 		k = strings.ToLower(strings.TrimSpace(k))

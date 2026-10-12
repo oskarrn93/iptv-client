@@ -111,7 +111,7 @@ func run(ctx context.Context, svc *services.Services, args []string) error {
 			return err
 		}
 		force := len(args) > 1 && args[1] == "-force"
-		_, res, err := svc.Playlists.Refresh(ctx, id(0), force, progress)
+		res, err := svc.Playlists.Refresh(ctx, id(0), force, progress)
 		fmt.Fprintln(os.Stderr)
 		if err != nil {
 			return err

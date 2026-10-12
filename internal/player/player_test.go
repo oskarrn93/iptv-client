@@ -74,8 +74,8 @@ func TestSanitizeOptions(t *testing.T) {
 			t.Errorf("SanitizeOptions(%v) = %v, want empty", m, got)
 		}
 	}
-	if SanitizeOptions(nil) == nil {
-		t.Error("SanitizeOptions(nil) returned nil map")
+	if got := SanitizeOptions(nil); got != nil {
+		t.Errorf("SanitizeOptions(nil) = %v, want nil", got)
 	}
 }
 

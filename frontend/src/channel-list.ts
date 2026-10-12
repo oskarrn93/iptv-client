@@ -1,4 +1,4 @@
-import { append, groupLabel, h } from './dom';
+import { append, groupLabel, h, setSelected } from './dom';
 import { Channels } from '../wailsjs/go/main/App';
 import type { main } from '../wailsjs/go/models';
 
@@ -168,13 +168,8 @@ export class ChannelList {
   }
 
   #row(index: number, channel: Channel | undefined): HTMLElement {
-    const selected = index === this.#selected;
-    const row = h('div', {
-      class: `channel-row${selected ? ' selected' : ''}`,
-      role: 'option',
-      'aria-selected': String(selected),
-      dataset: { index: String(index) },
-    });
+    const row = h('div', { class: 'channel-row', role: 'option', dataset: { index: String(index) } });
+    setSelected(row, index === this.#selected);
     row.style.transform = `translateY(${index * ROW_HEIGHT}px)`;
 
     if (!channel) {
@@ -248,9 +243,7 @@ export class ChannelList {
     // happens on mousedown, and replacing the pressed button before mouseup
     // makes the browser drop the click (and dblclick).
     for (const row of this.#spacer.children as HTMLCollectionOf<HTMLElement>) {
-      const selected = Number(row.dataset.index) === this.#selected;
-      row.classList.toggle('selected', selected);
-      row.setAttribute('aria-selected', String(selected));
+      setSelected(row, Number(row.dataset.index) === this.#selected);
     }
     this.#schedule(); // only rebuilds if scrolling changed the visible range
   }

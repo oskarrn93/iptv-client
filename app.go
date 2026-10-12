@@ -246,7 +246,7 @@ func (a *App) AddPlaylistFile(name string) (ImportResult, error) {
 }
 
 func (a *App) add(name, source string, typ playlist.SourceType) (ImportResult, error) {
-	return a.runImport("add_playlist", 0, []slog.Attr{slog.String("source_type", string(typ))},
+	return a.runImport("add_playlist", []slog.Attr{slog.String("source_type", string(typ))},
 		func(ctx context.Context, svc *services.Services) (playlist.Playlist, playlist.RefreshResult, error) {
 			return svc.Playlists.Add(ctx, name, source, a.progress)
 		})
@@ -255,20 +255,23 @@ func (a *App) add(name, source string, typ playlist.SourceType) (ImportResult, e
 // RefreshPlaylist re-imports a playlist. Without force, URL playlists are
 // rate limited and TooSoonMinutes is set instead of returning an error.
 func (a *App) RefreshPlaylist(id int64, force bool) (ImportResult, error) {
-	return a.runImport("refresh_playlist", id, []slog.Attr{slog.Bool("force", force)},
+	return a.runImport("refresh_playlist", []slog.Attr{slog.Int64("playlist_id", id), slog.Bool("force", force)},
 		func(ctx context.Context, svc *services.Services) (playlist.Playlist, playlist.RefreshResult, error) {
-			return svc.Playlists.Refresh(ctx, id, force, a.progress)
+			res, err := svc.Playlists.Refresh(ctx, id, force, a.progress)
+			if err != nil {
+				return playlist.Playlist{}, res, err
+			}
+			// The import has committed: a cancel arriving now must not fail it.
+			p, err := svc.Playlists.Get(context.WithoutCancel(ctx), id)
+			return p, res, err
 		})
 }
 
-// runImport runs an add (id 0) or a refresh of playlist id under the import
-// guard, logs its start and result, and builds the result for the UI.
-func (a *App) runImport(op string, id int64, attrs []slog.Attr,
+// runImport runs an add or refresh under the import guard, logs its start
+// and result, and builds the result for the UI.
+func (a *App) runImport(op string, attrs []slog.Attr,
 	run func(context.Context, *services.Services) (playlist.Playlist, playlist.RefreshResult, error)) (_ ImportResult, err error) {
 
-	if id != 0 {
-		attrs = append([]slog.Attr{slog.Int64("playlist_id", id)}, attrs...)
-	}
 	ctx, end := a.call(op, attrs...)
 	defer end(&err)
 	svc, err := a.ready()
@@ -289,14 +292,11 @@ func (a *App) runImport(op string, id int64, attrs []slog.Attr,
 		return ImportResult{TooSoonMinutes: tooSoon.Minutes()}, nil
 	}
 	if err != nil {
-		return ImportResult{Skipped: res.Skipped}, importError(err)
+		return ImportResult{}, importError(err)
 	}
-	logAttrs := []any{"imported", res.Imported, "skipped", res.Skipped, "hls", res.HLS,
-		"not_modified", res.NotModified, "took", time.Since(start).Round(time.Millisecond)}
-	if id == 0 {
-		logAttrs = append(logAttrs, "playlist_id", p.ID)
-	}
-	a.log.InfoContext(ctx, "import finished", logAttrs...)
+	a.log.InfoContext(ctx, "import finished", "playlist_id", p.ID, "imported", res.Imported,
+		"skipped", res.Skipped, "hls", res.HLS, "not_modified", res.NotModified,
+		"took", time.Since(start).Round(time.Millisecond))
 	dto := toPlaylist(p)
 	return ImportResult{Playlist: &dto, Imported: res.Imported, Skipped: res.Skipped, NotModified: res.NotModified}, nil
 }
