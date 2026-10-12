@@ -12,6 +12,10 @@ updates:
     groups:
       go:
         update-types: [minor, patch]
+    # The Wails v2 CLI needs clir v1.3.0: newer versions ignore the Default()
+    # methods it uses for flag defaults (see the note in go.mod).
+    ignore:
+      - dependency-name: github.com/leaanthony/clir
 
   - package-ecosystem: npm
     directory: /frontend
