@@ -26,7 +26,7 @@ Run from the repo root. The Wails CLI is pinned in `go.mod` as a Go tool: always
 
 ### Windows Smart App Control
 
-The dev machine has Smart App Control on, which blocks some locally built unsigned binaries: a globally installed `wails.exe`, the fuzz test binary, sometimes Wails' `wailsbindings.exe`, and the `wails dev` binary (so hot reload doesn't work). Workarounds: `go tool wails`, `-skipbindings` when the Go API is unchanged, fuzzing in CI, and checking UI changes with `npm run test:e2e` rather than `wails dev`.
+The dev machine has Smart App Control on, which blocks some locally built unsigned binaries: a globally installed `wails.exe`, the fuzz test binary, sometimes Wails' `wailsbindings.exe` and the test binary of a new or changed package, and the `wails dev` binary (so hot reload doesn't work). Workarounds: `go tool wails`, `-skipbindings` when the Go API is unchanged, fuzzing in CI, running blocked package tests in WSL (`GOOS=linux go test -c -o /tmp/x.test ./internal/x && wsl.exe --cd "$(cygpath -w /tmp)" ./x.test`), and checking UI changes with `npm run test:e2e` rather than `wails dev`. In PowerShell, `npm` may need the machine PATH reloaded first.
 
 ## Architecture
 
@@ -40,6 +40,7 @@ The dev machine has Smart App Control on, which blocks some locally built unsign
 - `player`: player discovery per OS (`find_*.go`), per-player argument profiles, the URL scheme and `#EXTVLCOPT` allowlists, and the direct exec launch (never through a shell).
 - `update`: the in-app updater reads GitHub's latest release. Per-OS `Platform` strategies are in `windows.go` and `darwin.go`. The release asset names are a contract with `.github/workflows/build.yml`.
 - `importguard.go`: only one import runs at a time, and the UI can cancel it. Progress reaches the UI through Wails events (`ImportProgressEvent`, `UpdateProgressEvent`).
+- `logging`: `log/slog` text logs in daily, size-rotated, pruned files (`%LocalAppData%\IPTVClient\logs`, `~/Library/Logs/IPTVClient`, or next to `$IPTV_CLIENT_DB`). `Setup` returns `Logs`, used only in `main.go`; everything else takes a plain `*slog.Logger` (and `App` the `*slog.LevelVar`). Also the Wails logger adapter (Trace dropped), `UI` for frontend lines (`App.Log`, `component=ui`, validated and rate-limited) and crash capture (`debug.SetCrashOutput`, logged at the next start). `redact` is its backstop; `desktop.OpenFolder` opens the folder.
 
 **Frontend.** `frontend/src` is Vite + TypeScript with no framework. `channel-list.ts` is a virtualized list: it fetches all matching channel IDs (`ChannelIDs`), then loads row data in chunks for the visible window (`Channels`). Use this ID-list paging pattern for large result sets. The e2e tests (`frontend/e2e/run.mjs`) serve the production build and replace the Go backend with an in-memory stub (`e2e/stub-backend.js`, 50k channels including HTML-laden names). **When you add or change an `App` method, update the stub too.**
 
@@ -49,9 +50,11 @@ The dev machine has Smart App Control on, which blocks some locally built unsign
 - Bound methods accept only IDs and plain values. File paths (player executable, local playlist) are chosen through native dialogs opened from Go, never passed in from JS.
 - Stream URLs and options never reach the UI. The `Channel` DTO omits them, playlist sources are redacted, and copy-URL writes to the clipboard from Go.
 - Any new player argument or option must go through the allowlists in `internal/player`.
+- Never log URLs, stream options, the User-Agent, file paths or channel/playlist names; log IDs (`playlist_id`, `channel_id`). The handler redacts every value with `internal/redact` as a backstop, and `internal/logging/leak_test.go` must keep passing.
 
 ## Conventions
 
 - Frontend TS uses modern syntax: `async`/`await` with `try`/`catch`, not `.then()` chains.
+- Logging: use the `*Context` slog methods where a `ctx` exists. Bound methods start with `ctx, end := a.call("op", attrs...)` and `defer end(&err)`, which tags lines with `op` and logs a returned error (Debug if expected, else Warn). Frontend code logs through `log.ts`, not `console.*`.
 - Releases: push a `vX.Y.Z` tag. CI stamps the version (`-X main.version`, and `wails.json` via `.github/stamp-version.js`). Leave `productVersion` at `0.0.0` in the repo. Local builds report `dev`, and `dev` builds refuse to self-update.
 - Edit `build/windows/installer/project.nsi`, not `wails_tools.nsh` (Wails regenerates it).

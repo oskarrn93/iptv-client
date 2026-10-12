@@ -13,11 +13,13 @@ import {
   InstallUpdate,
   ListGroups,
   ListPlaylists,
+  OpenLogFolder,
   Play,
   RefreshPlaylist,
   RenamePlaylist,
   ResetPlayer,
   SetFavorite,
+  SetLogLevel,
   SetUserAgent,
 } from '../wailsjs/go/main/App';
 import type { main } from '../wailsjs/go/models';
@@ -25,7 +27,10 @@ import { EventsOn } from '../wailsjs/runtime/runtime';
 import { ChannelList } from './channel-list';
 import { confirmDialog, promptDialog, showDialog } from './dialogs';
 import { $, type Child, debounce, errorMessage, formatCount, h, plural, timeAgo } from './dom';
+import { installErrorHandlers, type Level } from './log';
 import { showMenu } from './menu';
+
+installErrorHandlers();
 
 type Selection = { kind: 'all' } | { kind: 'favorites' } | { kind: 'group'; name: string };
 
@@ -459,12 +464,22 @@ const updateButton = (current: string): HTMLButtonElement => {
   return button;
 };
 
+const openLogFolder = guard(() => OpenLogFolder());
+
+const logFolderButton = (): HTMLButtonElement =>
+  h('button', { type: 'button', class: 'small', onclick: () => void openLogFolder() }, 'Open log folder…');
+
 const openSettings = async (): Promise<void> => {
   let settings: main.Settings;
   try {
     settings = await GetSettings();
   } catch (error) {
-    fail(error);
+    // Usually the database failed to open; the log says why.
+    await showDialog(
+      'Settings unavailable',
+      [h('p', null, errorMessage(error)), h('div', { class: 'row' }, logFolderButton())],
+      [{ label: 'Close', value: '' }],
+    );
     return;
   }
   const playerStatus = h('p', { class: 'player-status' });
@@ -490,6 +505,18 @@ const openSettings = async (): Promise<void> => {
     autocomplete: 'off',
     spellcheck: false,
   });
+
+  const levels: [Level, string][] = [
+    ['debug', 'Debug (until restart)'],
+    ['info', 'Info'],
+    ['warn', 'Warning'],
+    ['error', 'Error'],
+  ];
+  const logLevel = h(
+    'select',
+    { id: 'log-level' },
+    ...levels.map(([value, label]) => h('option', { value, selected: value === settings.logLevel }, label)),
+  );
 
   await showDialog(
     'Settings',
@@ -520,6 +547,18 @@ const openSettings = async (): Promise<void> => {
         h('p', { class: 'hint' }, 'Some providers only accept specific players. Leave empty for the default.'),
       ),
       h(
+        'fieldset',
+        null,
+        h('legend', null, 'Logging'),
+        h('label', null, 'Log level', logLevel),
+        h('div', { class: 'row' }, logFolderButton()),
+        h(
+          'p',
+          { class: 'hint' },
+          'Use Debug when reporting a problem. Logs never contain stream or playlist URLs.',
+        ),
+      ),
+      h(
         'div',
         { class: 'row version-row' },
         h('p', { class: 'hint' }, `IPTV Client ${settings.version} · Data folder: ${settings.dataDir}`),
@@ -534,6 +573,7 @@ const openSettings = async (): Promise<void> => {
       if (value !== 'save') return true;
       try {
         await SetUserAgent(userAgent.value);
+        await SetLogLevel(logLevel.value);
         return true;
       } catch (error) {
         fail(error);

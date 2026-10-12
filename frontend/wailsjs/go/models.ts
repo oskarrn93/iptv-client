@@ -120,6 +120,7 @@ export namespace main {
 	    playerError: string;
 	    userAgent: string;
 	    defaultAgent: string;
+	    logLevel: string;
 	    dataDir: string;
 	    version: string;
 	
@@ -135,6 +136,7 @@ export namespace main {
 	        this.playerError = source["playerError"];
 	        this.userAgent = source["userAgent"];
 	        this.defaultAgent = source["defaultAgent"];
+	        this.logLevel = source["logLevel"];
 	        this.dataDir = source["dataDir"];
 	        this.version = source["version"];
 	    }

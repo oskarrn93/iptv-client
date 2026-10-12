@@ -106,6 +106,12 @@ Section
 SectionEnd
 
 Section "uninstall"
+    # Log files (internal/logging) are per user in %LocalAppData%. Only the
+    # logs go: the database in %AppData% is the user's data and is kept.
+    SetShellVarContext current
+    RMDir /r "$LOCALAPPDATA\IPTVClient\logs"
+    RMDir "$LOCALAPPDATA\IPTVClient" # only if now empty
+
     !insertmacro wails.setShellContext
 
     RMDir /r "$AppData\${PRODUCT_EXECUTABLE}" # Remove the WebView2 DataPath

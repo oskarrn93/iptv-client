@@ -35,7 +35,8 @@ export const h = <K extends keyof HTMLElementTagNameMap>(
 export const append = (parent: Node, ...children: Child[]): void => {
   for (const child of children) {
     if (child === null || child === undefined || child === false) continue;
-    parent.appendChild(child instanceof Node ? child : document.createTextNode(String(child)));
+    // A typeof test (not instanceof) lets CodeQL see strings never reach appendChild as-is.
+    parent.appendChild(typeof child === 'object' ? child : document.createTextNode(String(child)));
   }
 };
 

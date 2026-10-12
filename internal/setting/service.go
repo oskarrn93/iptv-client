@@ -1,13 +1,16 @@
 // Package setting stores and validates the user's settings: the media
-// player location and the User-Agent used to download playlists.
+// player location, the User-Agent used to download playlists and the log
+// level.
 package setting
 
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 
 	"iptv-client/internal/database"
+	"iptv-client/internal/logging"
 	"iptv-client/internal/player"
 )
 
@@ -15,6 +18,7 @@ import (
 const (
 	KeyPlayerPath = "vlc_path" // named before players other than VLC were supported
 	KeyUserAgent  = "user_agent"
+	KeyLogLevel   = "log_level"
 )
 
 // Service reads and validates the user's settings.
@@ -94,4 +98,30 @@ func (s *Service) SetUserAgent(ctx context.Context, ua string) error {
 		return s.repo.Delete(ctx, KeyUserAgent)
 	}
 	return s.repo.Set(ctx, KeyUserAgent, ua)
+}
+
+// LogLevel returns the saved log level (Info if unset).
+func (s *Service) LogLevel(ctx context.Context) (slog.Level, error) {
+	v, err := s.repo.Get(ctx, KeyLogLevel)
+	if err != nil || v == "" {
+		return slog.LevelInfo, err
+	}
+	l, err := logging.ParseLevel(v)
+	if err != nil {
+		return slog.LevelInfo, nil // ignore a corrupt value
+	}
+	return l, nil
+}
+
+// SetLogLevel saves a log level. Debug is accepted but not saved, so it
+// lasts until the app restarts and a forgotten Debug cannot fill the disk;
+// the previously saved level is kept.
+func (s *Service) SetLogLevel(ctx context.Context, level slog.Level) error {
+	switch {
+	case level < slog.LevelInfo:
+		return nil
+	case level == slog.LevelInfo:
+		return s.repo.Delete(ctx, KeyLogLevel)
+	}
+	return s.repo.Set(ctx, KeyLogLevel, logging.LevelName(level))
 }

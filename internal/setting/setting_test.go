@@ -2,11 +2,13 @@ package setting
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"iptv-client/internal/database"
+	"iptv-client/internal/logging"
 )
 
 func newService(t *testing.T) *Service {
@@ -75,5 +77,39 @@ func TestSetPlayerPath(t *testing.T) {
 	}
 	if err := svc.SetPlayerPath(ctx, ""); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLogLevel(t *testing.T) {
+	ctx := context.Background()
+	svc := newService(t)
+	level := func() string {
+		t.Helper()
+		l, err := svc.LogLevel(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return logging.LevelName(l)
+	}
+	if got := level(); got != "info" {
+		t.Errorf("default = %q", got)
+	}
+	if err := svc.SetLogLevel(ctx, slog.LevelWarn); err != nil {
+		t.Fatal(err)
+	}
+	if got := level(); got != "warn" {
+		t.Errorf("after warn = %q", got)
+	}
+	if err := svc.SetLogLevel(ctx, slog.LevelDebug); err != nil {
+		t.Fatal(err)
+	}
+	if got := level(); got != "warn" {
+		t.Errorf("debug was saved: %q", got)
+	}
+	if err := svc.SetLogLevel(ctx, slog.LevelInfo); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := svc.repo.Get(ctx, KeyLogLevel); v != "" {
+		t.Errorf("info stored as %q, want deleted", v)
 	}
 }

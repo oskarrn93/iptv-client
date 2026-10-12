@@ -59,7 +59,10 @@ What we observed:
 
 - `go install …/wails` produced a `wails.exe` that was **blocked**. That is why
   the CLI is pinned as a Go tool and run via `go tool wails` (which works).
-- `go test` and the built `build/bin/iptv-client.exe` usually ran fine.
+- `go test` and the built `build/bin/iptv-client.exe` usually ran fine, but
+  the test binary of a **new or changed package** was sometimes blocked (seen
+  with `internal/redact`, `internal/logging`, `internal/channel`). Run those
+  tests in WSL instead (below), or rely on CI.
 - The **fuzz** test binary (`go test -fuzz`) was blocked. Fuzzing runs in CI on
   Linux instead.
 - Wails' temporary **binding generator** (`wailsbindings.exe`) was blocked on
@@ -75,6 +78,16 @@ Smart App Control decides per binary, so other builds may be hit. Options if
 something you build is blocked: run that step in CI, or turn Smart App Control
 off. Note that turning it off is permanent unless you reinstall Windows, so
 don't do that casually.
+
+To run a blocked package's tests, cross-compile them for Linux and run them in
+WSL (any distro; Go is not needed inside it). The core is pure Go, so this
+tests the same code, minus Windows-specific behavior, which CI's `windows` job
+covers:
+
+```bash
+GOOS=linux go test -c -o /tmp/logging.test ./internal/logging
+wsl.exe --cd "$(cygpath -w /tmp)" ./logging.test -test.v
+```
 
 Check its state from PowerShell (`1` = on, `0` = off, `2` = evaluation):
 
@@ -110,6 +123,7 @@ Run from the repository root.
 | Unit tests (core) | `go test ./internal/... ./cmd/...` |
 | Skip the 200k-row performance test | `go test -short ./internal/...` |
 | Fuzz the parser (Linux/macOS) | `go test ./internal/m3u -run '^$' -fuzz FuzzParse -fuzztime 60s` |
+| Fuzz log redaction (Linux/macOS) | `go test ./internal/redact -run '^$' -fuzz FuzzString -fuzztime 30s` |
 | UI tests (headless Edge) | `cd frontend && npm run test:e2e` |
 | UI tests with Chrome / screenshots | `E2E_BROWSER=chrome E2E_SCREENSHOTS=./shots npm run test:e2e` |
 | Regenerate TS bindings after changing `app.go` | `go tool wails generate module` (commit `frontend/wailsjs`) |
@@ -176,6 +190,45 @@ stored **unencrypted** in this file.
 Set `IPTV_CLIENT_DB` to a file path to use a different database, e.g. for
 testing with large playlists without touching your own data. The app and
 `iptv-debug` both honor it (`iptv-debug -db` still overrides it).
+
+### Logs
+
+| OS | Log folder |
+|---|---|
+| Windows | `%LocalAppData%\IPTVClient\logs` |
+| macOS | `~/Library/Logs/IPTVClient` (Console.app lists it under Log Reports) |
+| `IPTV_CLIENT_DB` set | a `logs` folder next to that database |
+
+**Settings → Logging → Open log folder…** opens it. Logs are `log/slog` text
+(`key=value`), one file per day and run: `iptv-client-<date>-<run>.log`, with
+`-2`, `-3`… parts past 10 MB. `run` is a random ID that is also on every line,
+so lines from different runs (a restart, an update) can be told apart. The
+first line of each file has the version, OS, architecture and Go/Wails
+versions. Files older than 14 days are deleted, then the oldest until the
+folder holds at most 100 MB.
+
+- **Level:** Settings → Logging, Info by default. Debug lasts until the app
+  restarts, so a forgotten Debug cannot fill the disk.
+- **Sources:** Go code; Wails itself (`component=wails`, Trace dropped because
+  it contains every call result); the frontend (`component=ui`) through
+  `App.Log`, which validates, size-limits and rate-limits its input. Uncaught
+  JS errors and unhandled rejections are logged automatically.
+- **Crashes:** a fatal Go error (for example a panic in a goroutine) is written
+  by the runtime to `crash-<run>.tmp` in the same folder. The next start adds
+  it, redacted, to the log as `previous run crashed` and deletes the file.
+- **Privacy:** every message and value goes through `internal/redact`. Never
+  log URLs, stream options, the User-Agent or names; log IDs
+  (`playlist_id`, `channel_id`).
+- The Windows uninstaller deletes the log folder; on macOS remove
+  `~/Library/Logs/IPTVClient` by hand.
+
+```bash
+# Follow the newest log (Git Bash on Windows)
+tail -f "$(ls -t "$LOCALAPPDATA"/IPTVClient/logs/iptv-client-*.log | head -1)"
+# Only frontend lines, or only warnings and errors
+grep 'component=ui' "$LOCALAPPDATA"/IPTVClient/logs/*.log
+grep -E 'level=(WARN|ERROR)' "$LOCALAPPDATA"/IPTVClient/logs/*.log
+```
 
 ## CI and releases
 
@@ -258,7 +311,8 @@ run it from an installed location.
   (`winget install NSIS.NSIS`, then add `C:\Program Files (x86)\NSIS` to
   `PATH`). The installer installs per machine into Program Files (asks for
   admin), adds Start menu and desktop shortcuts, installs WebView2 if missing
-  and registers an uninstaller. Uninstalling keeps the playlist database.
+  and registers an uninstaller. Uninstalling keeps the playlist database and
+  deletes the log folder.
   Wails regenerates `wails_tools.nsh` on every `-nsis` build, so edit
   `project.nsi` instead.
 - **macOS:** CI stages the `.app` alone in a folder and runs `create-dmg`
@@ -295,7 +349,7 @@ The app is not code-signed (no paid developer account).
 | Tests | ✅ | ⏳ (CI) |
 | App build + window opens | ✅ | ⏳ (CI on tags) |
 | VLC detection + playback | ✅ (registry lookup) | ⏳ |
-| UI tests (`npm run test:e2e`) | ✅ Edge, 33/33 | ⏳ (CI runs them in Chrome on Linux) |
+| UI tests (`npm run test:e2e`) | ✅ Edge, 49/49 (2026-10-11) | ⏳ (CI runs them in Chrome on Linux) |
 | App renders real data (50k channels) | ✅ | ⏳ |
 | `go tool wails dev` | ❌ blocked by Smart App Control | ⏳ |
 

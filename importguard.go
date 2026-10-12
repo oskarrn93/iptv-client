@@ -7,6 +7,9 @@ import (
 	"time"
 )
 
+// errImportRunning is returned when an import is already running.
+var errImportRunning = errors.New("another playlist is being imported; wait for it to finish")
+
 // importTimeout bounds a single add or refresh.
 const importTimeout = 10 * time.Minute
 
@@ -23,7 +26,7 @@ func (g *importGuard) begin(parent context.Context) (context.Context, func(), er
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.cancel != nil {
-		return nil, nil, errors.New("another playlist is being imported; wait for it to finish")
+		return nil, nil, errImportRunning
 	}
 	ctx, cancel := context.WithTimeout(parent, importTimeout)
 	g.cancel = cancel

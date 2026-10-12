@@ -40,6 +40,12 @@ Playlists are untrusted input. Before anything reaches the player:
 
 Playlist URLs are stored unencrypted in the local database.
 
+Logs never contain stream or playlist URLs, `#EXTVLCOPT` options, the
+User-Agent, or channel and playlist names: code logs IDs, and as a backstop
+every logged value is redacted (URLs are cut to `scheme://host/…`, the home
+folder becomes `~`). Provider host names are kept. Logs stay on this computer
+(see [docs/SETUP.md](docs/SETUP.md#logs)).
+
 ## Layout
 
 ```
@@ -48,7 +54,10 @@ frontend/              UI (Vite + TypeScript, no framework)
 frontend/e2e           UI tests against a stubbed backend
 internal/playlist      playlists: add, import/refresh, rename, delete (service + repository)
 internal/channel       channels: browse, search, favorites, play (service + repositories)
-internal/setting       settings: player location, User-Agent (service + repository)
+internal/setting       settings: player location, User-Agent, log level (service + repository)
+internal/logging       slog setup, rotated log files, crash capture, Wails/UI log adapters
+internal/redact        removes URLs' credentials and the home folder from logged text
+internal/desktop       opens a folder in Explorer/Finder
 internal/database      SQLite connection, migrations, transactions
 internal/m3u           streaming playlist parser
 internal/fetch         playlist download (size cap, ETag, credential-safe errors)

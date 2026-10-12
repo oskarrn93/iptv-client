@@ -54,6 +54,14 @@ export function ListPlaylists() {
   return window['go']['main']['App']['ListPlaylists']();
 }
 
+export function Log(arg1, arg2, arg3) {
+  return window['go']['main']['App']['Log'](arg1, arg2, arg3);
+}
+
+export function OpenLogFolder() {
+  return window['go']['main']['App']['OpenLogFolder']();
+}
+
 export function Play(arg1) {
   return window['go']['main']['App']['Play'](arg1);
 }
@@ -72,6 +80,10 @@ export function ResetPlayer() {
 
 export function SetFavorite(arg1, arg2) {
   return window['go']['main']['App']['SetFavorite'](arg1, arg2);
+}
+
+export function SetLogLevel(arg1) {
+  return window['go']['main']['App']['SetLogLevel'](arg1);
 }
 
 export function SetUserAgent(arg1) {

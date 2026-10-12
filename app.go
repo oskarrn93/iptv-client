@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
@@ -13,7 +15,9 @@ import (
 
 	"iptv-client/internal/channel"
 	"iptv-client/internal/database"
+	"iptv-client/internal/desktop"
 	"iptv-client/internal/fetch"
+	"iptv-client/internal/logging"
 	"iptv-client/internal/player"
 	"iptv-client/internal/playlist"
 	"iptv-client/internal/setting"
@@ -30,8 +34,12 @@ type App struct {
 	svc     *services
 	initErr error
 
-	imports importGuard
-	updater *update.Updater
+	log      *slog.Logger
+	logLevel *slog.LevelVar // the log level, changed by SetLogLevel
+	logDir   string
+	uiLog    *logging.UI
+	imports  importGuard
+	updater  *update.Updater
 }
 
 // services are the domain services the bound methods call.
@@ -50,26 +58,56 @@ func newServices(db *database.DB) *services {
 	}
 }
 
-// NewApp creates the application.
-func NewApp() *App {
-	return &App{updater: &update.Updater{Current: version, UserAgent: "iptv-client/" + version}}
+// NewApp creates the application. It logs to log, whose level is
+// logLevel, and logDir is the folder OpenLogFolder shows.
+func NewApp(log *slog.Logger, logLevel *slog.LevelVar, logDir string) *App {
+	return &App{
+		log:      log,
+		logLevel: logLevel,
+		logDir:   logDir,
+		uiLog:    logging.NewUI(log),
+		updater:  &update.Updater{Current: version, UserAgent: "iptv-client/" + version},
+	}
 }
+
+// errNoDatabase means the database failed to open at startup.
+var errNoDatabase = errors.New("could not open the database")
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.log.InfoContext(ctx, "starting", "version", version, "os", goruntime.GOOS, "arch", goruntime.GOARCH,
+		"db_override", os.Getenv(database.PathEnv) != "")
 	path, err := database.ResolvePath()
 	if err == nil {
 		var db *database.DB
 		if db, err = database.Open(ctx, path); err == nil {
 			a.db = db
 			a.svc = newServices(db)
+			a.started(ctx)
 			return
 		}
 	}
-	a.initErr = fmt.Errorf("could not open the database: %w", err)
+	a.initErr = fmt.Errorf("%w: %w", errNoDatabase, err)
+	a.log.ErrorContext(ctx, "cannot open the database", "err", err)
 }
 
-func (a *App) shutdown(context.Context) {
+// started applies the saved log level and logs the player in use.
+func (a *App) started(ctx context.Context) {
+	if level, err := a.svc.settings.LogLevel(ctx); err == nil {
+		a.logLevel.Set(level)
+	}
+	a.log.InfoContext(ctx, "database open", "log_level", logging.LevelName(a.logLevel.Level()))
+	// Finding the player reads the registry and searches folders; don't
+	// hold up the window for a log line.
+	go func() {
+		if s, err := a.svc.settings.Get(ctx); err == nil {
+			a.log.InfoContext(ctx, "player", "name", s.PlayerName, "chosen", s.PlayerOverride, "found", s.PlayerError == nil)
+		}
+	}()
+}
+
+func (a *App) shutdown(ctx context.Context) {
+	a.log.InfoContext(ctx, "shutting down")
 	if a.db != nil {
 		a.db.Close()
 	}
@@ -81,6 +119,31 @@ func (a *App) ready() (*services, error) {
 		return nil, a.initErr
 	}
 	return a.svc, nil
+}
+
+// call starts a bound-method call: the returned context tags log lines
+// with op and attrs, and end, deferred with the method's error, logs a
+// failure (at Debug when it is part of normal use, otherwise at Warn).
+func (a *App) call(op string, attrs ...slog.Attr) (ctx context.Context, end func(*error)) {
+	ctx = logging.With(a.ctx, append([]slog.Attr{slog.String("op", op)}, attrs...)...)
+	return ctx, func(err *error) {
+		if *err == nil {
+			return
+		}
+		level := slog.LevelWarn
+		if expectedError(*err) {
+			level = slog.LevelDebug
+		}
+		a.log.Log(ctx, level, "call failed", "err", *err)
+	}
+}
+
+// expectedError reports errors that are part of normal use, or were
+// already logged.
+func expectedError(err error) bool {
+	return errors.Is(err, errImportRunning) ||
+		errors.Is(err, database.ErrNotFound) || errors.Is(err, errNoDatabase) ||
+		errors.Is(err, context.Canceled)
 }
 
 // --- DTOs (also generate the TypeScript models) ---
@@ -138,6 +201,7 @@ type Settings struct {
 	PlayerError    string `json:"playerError"`    // why no player was found
 	UserAgent      string `json:"userAgent"`      // "" = default
 	DefaultAgent   string `json:"defaultAgent"`   // shown as placeholder
+	LogLevel       string `json:"logLevel"`       // debug, info, warn or error
 	DataDir        string `json:"dataDir"`
 	Version        string `json:"version"`
 }
@@ -158,12 +222,14 @@ const UpdateProgressEvent = "update-progress"
 // --- playlists ---
 
 // ListPlaylists returns all playlists.
-func (a *App) ListPlaylists() ([]Playlist, error) {
+func (a *App) ListPlaylists() (_ []Playlist, err error) {
+	ctx, end := a.call("list_playlists")
+	defer end(&err)
 	svc, err := a.ready()
 	if err != nil {
 		return nil, err
 	}
-	ps, err := svc.playlists.List(a.ctx)
+	ps, err := svc.playlists.List(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +242,7 @@ func (a *App) ListPlaylists() ([]Playlist, error) {
 
 // AddPlaylistURL imports a playlist from an http(s) URL.
 func (a *App) AddPlaylistURL(name, url string) (ImportResult, error) {
-	return a.add(name, url)
+	return a.add(name, url, playlist.SourceURL)
 }
 
 // AddPlaylistFile asks the user for a playlist file and imports it.
@@ -192,48 +258,57 @@ func (a *App) AddPlaylistFile(name string) (ImportResult, error) {
 	if err != nil || path == "" {
 		return ImportResult{}, err
 	}
-	return a.add(name, path)
+	return a.add(name, path, playlist.SourceFile)
 }
 
-func (a *App) add(name, source string) (ImportResult, error) {
+func (a *App) add(name, source string, typ playlist.SourceType) (_ ImportResult, err error) {
+	ctx, end := a.call("add_playlist", slog.String("source_type", string(typ)))
+	defer end(&err)
 	svc, err := a.ready()
 	if err != nil {
 		return ImportResult{}, err
 	}
-	ctx, done, err := a.imports.begin(a.ctx)
+	ctx, done, err := a.imports.begin(ctx)
 	if err != nil {
 		return ImportResult{}, err
 	}
 	defer done()
+	finished := a.importStarted(ctx)
 	p, res, err := svc.playlists.Add(ctx, name, source, a.progress)
 	if err != nil {
 		return ImportResult{}, importError(err)
 	}
+	finished(res, "playlist_id", p.ID)
 	dto := toPlaylist(p)
 	return ImportResult{Playlist: &dto, Imported: res.Imported, Skipped: res.Skipped}, nil
 }
 
 // RefreshPlaylist re-imports a playlist. Without force, URL playlists are
 // rate limited and TooSoonMinutes is set instead of returning an error.
-func (a *App) RefreshPlaylist(id int64, force bool) (ImportResult, error) {
+func (a *App) RefreshPlaylist(id int64, force bool) (_ ImportResult, err error) {
+	ctx, end := a.call("refresh_playlist", slog.Int64("playlist_id", id), slog.Bool("force", force))
+	defer end(&err)
 	svc, err := a.ready()
 	if err != nil {
 		return ImportResult{}, err
 	}
-	ctx, done, err := a.imports.begin(a.ctx)
+	ctx, done, err := a.imports.begin(ctx)
 	if err != nil {
 		return ImportResult{}, err
 	}
 	defer done()
+	finished := a.importStarted(ctx)
 	res, err := svc.playlists.Refresh(ctx, id, force, a.progress)
 	var tooSoon *playlist.TooSoonError
 	if errors.As(err, &tooSoon) {
+		a.log.InfoContext(ctx, "refresh refused: too soon", "wait_minutes", tooSoon.Minutes())
 		return ImportResult{TooSoonMinutes: tooSoon.Minutes()}, nil
 	}
 	if err != nil {
 		return ImportResult{Skipped: res.Skipped}, importError(err)
 	}
-	p, err := svc.playlists.Get(a.ctx, id)
+	finished(res, "not_modified", res.NotModified)
+	p, err := svc.playlists.Get(ctx, id)
 	if err != nil {
 		return ImportResult{}, err
 	}
@@ -242,35 +317,48 @@ func (a *App) RefreshPlaylist(id int64, force bool) (ImportResult, error) {
 }
 
 // CancelImport stops a running add/refresh. The previous data is kept.
-func (a *App) CancelImport() { a.imports.stop() }
+func (a *App) CancelImport() {
+	a.log.InfoContext(a.ctx, "import cancel requested")
+	a.imports.stop()
+}
 
 // RenamePlaylist changes a playlist's name.
-func (a *App) RenamePlaylist(id int64, name string) error {
+func (a *App) RenamePlaylist(id int64, name string) (err error) {
+	ctx, end := a.call("rename_playlist", slog.Int64("playlist_id", id))
+	defer end(&err)
 	svc, err := a.ready()
 	if err != nil {
 		return err
 	}
-	return svc.playlists.Rename(a.ctx, id, name)
+	return svc.playlists.Rename(ctx, id, name)
 }
 
 // DeletePlaylist removes a playlist and its favorites.
-func (a *App) DeletePlaylist(id int64) error {
+func (a *App) DeletePlaylist(id int64) (err error) {
+	ctx, end := a.call("delete_playlist", slog.Int64("playlist_id", id))
+	defer end(&err)
 	svc, err := a.ready()
 	if err != nil {
 		return err
 	}
-	return svc.playlists.Delete(a.ctx, id)
+	if err := svc.playlists.Delete(ctx, id); err != nil {
+		return err
+	}
+	a.log.InfoContext(ctx, "playlist deleted")
+	return nil
 }
 
 // --- channels ---
 
 // ListGroups returns a playlist's groups in playlist order.
-func (a *App) ListGroups(playlistID int64) ([]Group, error) {
+func (a *App) ListGroups(playlistID int64) (_ []Group, err error) {
+	ctx, end := a.call("list_groups", slog.Int64("playlist_id", playlistID))
+	defer end(&err)
 	svc, err := a.ready()
 	if err != nil {
 		return nil, err
 	}
-	gs, err := svc.channels.Groups(a.ctx, playlistID)
+	gs, err := svc.channels.Groups(ctx, playlistID)
 	if err != nil {
 		return nil, err
 	}
@@ -283,7 +371,9 @@ func (a *App) ListGroups(playlistID int64) ([]Group, error) {
 
 // ChannelIDs returns the IDs matching q in display order. The UI loads the
 // visible rows with Channels.
-func (a *App) ChannelIDs(q ChannelQuery) ([]int64, error) {
+func (a *App) ChannelIDs(q ChannelQuery) (_ []int64, err error) {
+	ctx, end := a.call("channel_ids", slog.Int64("playlist_id", q.PlaylistID))
+	defer end(&err)
 	svc, err := a.ready()
 	if err != nil {
 		return nil, err
@@ -292,16 +382,18 @@ func (a *App) ChannelIDs(q ChannelQuery) ([]int64, error) {
 	if !q.AllGroups {
 		f.Group = &q.Group
 	}
-	return svc.channels.IDs(a.ctx, f)
+	return svc.channels.IDs(ctx, f)
 }
 
 // Channels returns the rows for ids, in the order given.
-func (a *App) Channels(ids []int64) ([]Channel, error) {
+func (a *App) Channels(ids []int64) (_ []Channel, err error) {
+	ctx, end := a.call("channels")
+	defer end(&err)
 	svc, err := a.ready()
 	if err != nil {
 		return nil, err
 	}
-	cs, err := svc.channels.ByIDs(a.ctx, ids)
+	cs, err := svc.channels.ByIDs(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -313,32 +405,43 @@ func (a *App) Channels(ids []int64) ([]Channel, error) {
 }
 
 // SetFavorite marks or unmarks a channel as favorite.
-func (a *App) SetFavorite(channelID int64, favorite bool) error {
+func (a *App) SetFavorite(channelID int64, favorite bool) (err error) {
+	ctx, end := a.call("set_favorite", slog.Int64("channel_id", channelID), slog.Bool("favorite", favorite))
+	defer end(&err)
 	svc, err := a.ready()
 	if err != nil {
 		return err
 	}
-	return svc.channels.SetFavorite(a.ctx, channelID, favorite)
+	return svc.channels.SetFavorite(ctx, channelID, favorite)
 }
 
 // Play opens a channel in the configured player and returns its name.
-func (a *App) Play(channelID int64) (string, error) {
+func (a *App) Play(channelID int64) (_ string, err error) {
+	ctx, end := a.call("play", slog.Int64("channel_id", channelID))
+	defer end(&err)
 	svc, err := a.ready()
 	if err != nil {
 		return "", err
 	}
-	return svc.channels.Play(a.ctx, channelID)
+	name, err := svc.channels.Play(ctx, channelID)
+	if err != nil {
+		return "", err
+	}
+	a.log.InfoContext(ctx, "player started")
+	return name, nil
 }
 
 // CopyStreamURL puts a channel's stream URL on the clipboard. The URL is
 // copied from Go so it never reaches the UI: provider URLs often embed the
 // account credentials.
-func (a *App) CopyStreamURL(channelID int64) error {
+func (a *App) CopyStreamURL(channelID int64) (err error) {
+	ctx, end := a.call("copy_stream_url", slog.Int64("channel_id", channelID))
+	defer end(&err)
 	svc, err := a.ready()
 	if err != nil {
 		return err
 	}
-	url, err := svc.channels.StreamURL(a.ctx, channelID)
+	url, err := svc.channels.StreamURL(ctx, channelID)
 	if err != nil {
 		return err
 	}
@@ -348,18 +451,27 @@ func (a *App) CopyStreamURL(channelID int64) error {
 // --- settings ---
 
 // GetSettings returns the current settings.
-func (a *App) GetSettings() (Settings, error) {
+func (a *App) GetSettings() (_ Settings, err error) {
+	ctx, end := a.call("get_settings")
+	defer end(&err)
 	svc, err := a.ready()
 	if err != nil {
 		return Settings{}, err
 	}
-	ls, err := svc.settings.Get(a.ctx)
+	return a.settings(ctx, svc)
+}
+
+// settings builds the Settings DTO. Bound methods use it rather than
+// calling GetSettings, which would log a failure twice under another op.
+func (a *App) settings(ctx context.Context, svc *services) (Settings, error) {
+	ls, err := svc.settings.Get(ctx)
 	if err != nil {
 		return Settings{}, err
 	}
 	s := Settings{
 		PlayerPath: ls.PlayerPath, PlayerName: ls.PlayerName, PlayerOverride: ls.PlayerOverride,
-		UserAgent: ls.UserAgent, DefaultAgent: fetch.DefaultUserAgent, Version: version,
+		UserAgent: ls.UserAgent, DefaultAgent: fetch.DefaultUserAgent,
+		LogLevel: logging.LevelName(a.logLevel.Level()), Version: version,
 	}
 	if ls.PlayerError != nil {
 		s.PlayerError = ls.PlayerError.Error()
@@ -371,7 +483,9 @@ func (a *App) GetSettings() (Settings, error) {
 }
 
 // ChoosePlayer asks the user to locate a supported player and saves it.
-func (a *App) ChoosePlayer() (Settings, error) {
+func (a *App) ChoosePlayer() (_ Settings, err error) {
+	ctx, end := a.call("choose_player")
+	defer end(&err)
 	svc, err := a.ready()
 	if err != nil {
 		return Settings{}, err
@@ -388,32 +502,98 @@ func (a *App) ChoosePlayer() (Settings, error) {
 		return Settings{}, err
 	}
 	if path != "" {
-		if err := svc.settings.SetPlayerPath(a.ctx, path); err != nil {
+		if err := svc.settings.SetPlayerPath(ctx, path); err != nil {
 			return Settings{}, err
 		}
 	}
-	return a.GetSettings()
+	s, err := a.settings(ctx, svc)
+	if err == nil && path != "" {
+		a.log.InfoContext(ctx, "player chosen", "name", s.PlayerName)
+	}
+	return s, err
 }
 
 // ResetPlayer returns to automatic VLC detection.
-func (a *App) ResetPlayer() (Settings, error) {
+func (a *App) ResetPlayer() (_ Settings, err error) {
+	ctx, end := a.call("reset_player")
+	defer end(&err)
 	svc, err := a.ready()
 	if err != nil {
 		return Settings{}, err
 	}
-	if err := svc.settings.SetPlayerPath(a.ctx, ""); err != nil {
+	if err := svc.settings.SetPlayerPath(ctx, ""); err != nil {
 		return Settings{}, err
 	}
-	return a.GetSettings()
+	a.log.InfoContext(ctx, "player reset to auto-detect")
+	return a.settings(ctx, svc)
 }
 
 // SetUserAgent sets the User-Agent for playlist downloads ("" = default).
-func (a *App) SetUserAgent(ua string) error {
+func (a *App) SetUserAgent(ua string) (err error) {
+	ctx, end := a.call("set_user_agent")
+	defer end(&err)
 	svc, err := a.ready()
 	if err != nil {
 		return err
 	}
-	return svc.settings.SetUserAgent(a.ctx, ua)
+	if err := svc.settings.SetUserAgent(ctx, ua); err != nil {
+		return err
+	}
+	// Never the value: a custom User-Agent can identify the account.
+	a.log.DebugContext(ctx, "user agent saved", "custom", strings.TrimSpace(ua) != "")
+	return nil
+}
+
+// --- logging ---
+// These work without the database too, when the logs matter most.
+
+// SetLogLevel sets the log level: debug, info, warn or error. Debug lasts
+// until the app restarts; the others are saved.
+func (a *App) SetLogLevel(level string) (err error) {
+	ctx, end := a.call("set_log_level")
+	defer end(&err)
+	l, err := logging.ParseLevel(level)
+	if err != nil {
+		return err
+	}
+	if svc, err := a.ready(); err == nil {
+		if err := svc.settings.SetLogLevel(ctx, l); err != nil {
+			return err
+		}
+	}
+	old := a.logLevel.Level()
+	if l == old {
+		return nil
+	}
+	a.logLevel.Set(l)
+	// At least Info, so the change is visible whatever the new level.
+	a.log.Log(ctx, max(l, slog.LevelInfo), "log level changed", "from", logging.LevelName(old), "to", level)
+	return nil
+}
+
+// OpenLogFolder shows the log folder in Explorer or Finder.
+func (a *App) OpenLogFolder() (err error) {
+	ctx, end := a.call("open_log_folder")
+	defer end(&err)
+	dir := a.logDir
+	if dir == "" {
+		return errors.New("the log folder is unknown")
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	// The user may be about to attach these files: move any raw crash
+	// output into the (redacted) log first.
+	logging.RecoverCrashes(ctx, a.log, dir)
+	return desktop.OpenFolder(dir)
+}
+
+// Log writes a frontend log line (component=ui). The input is untrusted:
+// the level must be debug, info, warn or error, keys must be lower_snake
+// case, values are size-limited and redacted, and lines are rate-limited.
+// It never fails, so the UI never has to handle (or log) a logging error.
+func (a *App) Log(level, msg string, attrs map[string]string) {
+	a.uiLog.Log(level, msg, attrs)
 }
 
 // --- updates ---
@@ -421,28 +601,35 @@ func (a *App) SetUserAgent(ua string) error {
 
 // CheckForUpdate looks up the latest release. InstallUpdate installs it if
 // it is newer than the running version.
-func (a *App) CheckForUpdate() (UpdateInfo, error) {
-	ctx, cancel := context.WithTimeout(a.ctx, time.Minute)
+func (a *App) CheckForUpdate() (_ UpdateInfo, err error) {
+	ctx, end := a.call("check_update")
+	defer end(&err)
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	r, newer, err := a.updater.Check(ctx)
 	if err != nil {
 		return UpdateInfo{}, err
 	}
+	a.log.InfoContext(ctx, "update check", "latest", r.Version, "available", newer)
 	return UpdateInfo{Latest: r.Version, Available: newer}, nil
 }
 
 // InstallUpdate downloads the release found by CheckForUpdate, starts its
 // installation and quits the app, which restarts on the new version.
-func (a *App) InstallUpdate() error {
+func (a *App) InstallUpdate() (err error) {
+	ctx, end := a.call("install_update")
+	defer end(&err)
 	// Generous, so slow connections can still finish the download.
-	ctx, cancel := context.WithTimeout(a.ctx, time.Hour)
+	ctx, cancel := context.WithTimeout(ctx, time.Hour)
 	defer cancel()
-	err := a.updater.Install(ctx, func(pct int) {
+	a.log.InfoContext(ctx, "installing update")
+	err = a.updater.Install(ctx, func(pct int) {
 		runtime.EventsEmit(a.ctx, UpdateProgressEvent, pct)
 	})
 	if err != nil {
 		return err
 	}
+	a.log.InfoContext(ctx, "update installer started; quitting")
 	runtime.Quit(a.ctx)
 	return nil
 }
@@ -466,14 +653,34 @@ func toPlaylist(p playlist.Playlist) Playlist {
 	}
 }
 
+// importStarted logs the start of an import and returns a func that logs
+// its result and duration.
+func (a *App) importStarted(ctx context.Context) func(res playlist.RefreshResult, attrs ...any) {
+	start := time.Now()
+	a.log.InfoContext(ctx, "import started")
+	return func(res playlist.RefreshResult, attrs ...any) {
+		a.log.InfoContext(ctx, "import finished", append([]any{"imported", res.Imported, "skipped", res.Skipped,
+			"hls", res.HLS, "took", time.Since(start).Round(time.Millisecond)}, attrs...)...)
+	}
+}
+
+// uiError replaces an error's message for the UI but keeps it for errors.Is.
+type uiError struct {
+	msg string
+	err error
+}
+
+func (e uiError) Error() string { return e.msg }
+func (e uiError) Unwrap() error { return e.err }
+
 // importError rewrites add/refresh errors that would otherwise read poorly
 // in the UI.
 func importError(err error) error {
 	switch {
 	case errors.Is(err, context.Canceled):
-		return errors.New("import cancelled; the previous channel list was kept")
+		return uiError{"import cancelled; the previous channel list was kept", err}
 	case errors.Is(err, context.DeadlineExceeded):
-		return errors.New("import timed out; the previous channel list was kept")
+		return uiError{"import timed out; the previous channel list was kept", err}
 	case errors.Is(err, fetch.ErrTooLarge):
 		return fmt.Errorf("%w (limit %d MB)", err, fetch.DefaultMaxBytes>>20)
 	}
