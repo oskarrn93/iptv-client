@@ -564,8 +564,9 @@ const refreshPlaylist = async (p: main.Playlist, force = false): Promise<void> =
     await loadChannels();
   }
   // A refresh asks for fresh data, and the playlist may name a new guide.
+  // An unchanged playlist can't, and its channels still match the guide.
   const updated = state.playlists.find((x) => x.id === p.id);
-  if (updated?.guideSource) await refreshGuide(updated);
+  if (updated?.guideSource && (!result.notModified || guideStale(updated))) await refreshGuide(updated);
 };
 
 const editPlaylist = guard(async (p: main.Playlist) => {
