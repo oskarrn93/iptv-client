@@ -124,6 +124,7 @@ Run from the repository root.
 | Skip the 200k-row performance test | `go test -short ./internal/...` |
 | Fuzz the parser (Linux/macOS) | `go test ./internal/m3u -run '^$' -fuzz FuzzParse -fuzztime 60s` |
 | Fuzz log redaction (Linux/macOS) | `go test ./internal/redact -run '^$' -fuzz FuzzString -fuzztime 30s` |
+| Fuzz the XMLTV guide parser (Linux/macOS) | `go test ./internal/epg -run '^$' -fuzz FuzzParse -fuzztime 30s` |
 | UI tests (headless Edge) | `cd frontend && npm run test:e2e` |
 | UI tests with Chrome / screenshots | `E2E_BROWSER=chrome E2E_SCREENSHOTS=./shots npm run test:e2e` |
 | Update the README screenshots | `cd frontend && npm run screenshots` (commit `docs/screenshot*.png`) |
@@ -166,6 +167,8 @@ go run ./cmd/iptv-debug -db ./scratch.db add https://example.com/playlist.m3u "M
 go run ./cmd/iptv-debug -db ./scratch.db groups 1
 go run ./cmd/iptv-debug -db ./scratch.db search 1 bbc
 go run ./cmd/iptv-debug -db ./scratch.db play 42
+go run ./cmd/iptv-debug -db ./scratch.db guide 1 https://example.com/epg.xml.gz   # "-" = the playlist's own URL
+go run ./cmd/iptv-debug -db ./scratch.db now 42    # what is on, from the guide
 go run ./cmd/iptv-debug player     # which player would be used
 ```
 
@@ -194,8 +197,10 @@ installing Node).
 | Windows | `%AppData%\IPTVClient\iptv.db` |
 | macOS | `~/Library/Application Support/IPTVClient/iptv.db` |
 
-Playlist URLs (which often contain your provider username and password) are
-stored **unencrypted** in this file.
+Playlist and program guide URLs (which often contain your provider username
+and password) are stored **unencrypted** in this file. Channel logos are
+cached in a `logos` folder next to it; files unused for 30 days are deleted at
+startup.
 
 Set `IPTV_CLIENT_DB` to a file path to use a different database, e.g. for
 testing with large playlists without touching your own data. The app and

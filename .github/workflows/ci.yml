@@ -27,6 +27,7 @@ jobs:
       - run: go test ./internal/... ./cmd/...
       - run: go test ./internal/m3u -run '^$' -fuzz FuzzParse -fuzztime 60s
       - run: go test ./internal/redact -run '^$' -fuzz FuzzString -fuzztime 30s
+      - run: go test ./internal/epg -run '^$' -fuzz FuzzParse -fuzztime 30s
 
   frontend:
     runs-on: ubuntu-latest

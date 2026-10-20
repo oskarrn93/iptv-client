@@ -38,8 +38,8 @@ func (s *Service) IDs(ctx context.Context, f Filter) ([]int64, error) {
 	return s.repo.ListIDs(ctx, f)
 }
 
-// ByIDs returns the list fields of the channels with the given IDs, in the
-// order given. Unknown IDs are skipped.
+// ByIDs returns the channels with the given IDs, without URL and options,
+// in the order given. Unknown IDs are skipped.
 func (s *Service) ByIDs(ctx context.Context, ids []int64) ([]Channel, error) {
 	return s.repo.ListByIDs(ctx, ids)
 }

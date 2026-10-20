@@ -36,7 +36,8 @@ func (r *Repository) Create(ctx context.Context, name string, t SourceType, sour
 // Get returns one playlist.
 func (r *Repository) Get(ctx context.Context, id int64) (Playlist, error) {
 	row := r.q.QueryRowContext(ctx, `
-		SELECT id, name, source_type, source, etag, last_modified, last_refreshed_at, channel_count, created_at
+		SELECT id, name, source_type, source, etag, last_modified, last_refreshed_at, channel_count, created_at,
+		       guide_url, tvg_url, guide_refreshed_at
 		FROM playlists
 		WHERE id = ?`, id)
 	p, err := scanPlaylist(row)
@@ -57,7 +58,8 @@ func (r *Repository) Exists(ctx context.Context, id int64) (bool, error) {
 // List returns all playlists ordered by name.
 func (r *Repository) List(ctx context.Context) ([]Playlist, error) {
 	rows, err := r.q.QueryContext(ctx, `
-		SELECT id, name, source_type, source, etag, last_modified, last_refreshed_at, channel_count, created_at
+		SELECT id, name, source_type, source, etag, last_modified, last_refreshed_at, channel_count, created_at,
+		       guide_url, tvg_url, guide_refreshed_at
 		FROM playlists
 		ORDER BY name COLLATE NOCASE, id`)
 	if err != nil {
@@ -101,23 +103,52 @@ func (r *Repository) MarkRefreshed(ctx context.Context, id int64, refreshedAt ti
 }
 
 // SaveRefresh records a successful refresh that replaced the channels.
-func (r *Repository) SaveRefresh(ctx context.Context, id int64, channelCount int, etag, lastModified string, refreshedAt time.Time) error {
+// tvgURL is the guide URL from the playlist header.
+func (r *Repository) SaveRefresh(ctx context.Context, id int64, channelCount int, etag, lastModified, tvgURL string, refreshedAt time.Time) error {
 	return database.ExpectOne(r.q.ExecContext(ctx, `
 		UPDATE playlists
-		SET channel_count = ?, etag = ?, last_modified = ?, last_refreshed_at = ?
-		WHERE id = ?`, channelCount, etag, lastModified, refreshedAt.Unix(), id))
+		SET channel_count = ?, etag = ?, last_modified = ?, last_refreshed_at = ?, tvg_url = ?
+		WHERE id = ?`, channelCount, etag, lastModified, refreshedAt.Unix(), tvgURL, id))
+}
+
+// SetGuideURL sets the user's guide URL ("" = use the playlist's).
+func (r *Repository) SetGuideURL(ctx context.Context, id int64, url string) error {
+	return database.ExpectOne(r.q.ExecContext(ctx, `
+		UPDATE playlists
+		SET guide_url = ?
+		WHERE id = ?`, url, id))
+}
+
+// MarkGuideStale marks the guide as never imported, so that it is refreshed.
+func (r *Repository) MarkGuideStale(ctx context.Context, id int64) error {
+	return database.ExpectOne(r.q.ExecContext(ctx, `
+		UPDATE playlists
+		SET guide_refreshed_at = 0
+		WHERE id = ?`, id))
+}
+
+// MarkGuideRefreshed records a successful guide import.
+func (r *Repository) MarkGuideRefreshed(ctx context.Context, id int64, refreshedAt time.Time) error {
+	return database.ExpectOne(r.q.ExecContext(ctx, `
+		UPDATE playlists
+		SET guide_refreshed_at = ?
+		WHERE id = ?`, refreshedAt.Unix(), id))
 }
 
 // scanPlaylist reads the columns selected by Get and List, in that order.
 func scanPlaylist(row interface{ Scan(...any) error }) (Playlist, error) {
 	var p Playlist
-	var refreshed, created int64
-	err := row.Scan(&p.ID, &p.Name, &p.SourceType, &p.Source, &p.ETag, &p.LastModified, &refreshed, &p.ChannelCount, &created)
+	var refreshed, created, guideRefreshed int64
+	err := row.Scan(&p.ID, &p.Name, &p.SourceType, &p.Source, &p.ETag, &p.LastModified, &refreshed, &p.ChannelCount, &created,
+		&p.GuideURL, &p.TvgURL, &guideRefreshed)
 	if err != nil {
 		return Playlist{}, err
 	}
 	if refreshed > 0 {
 		p.LastRefreshedAt = time.Unix(refreshed, 0)
+	}
+	if guideRefreshed > 0 {
+		p.GuideRefreshedAt = time.Unix(guideRefreshed, 0)
 	}
 	p.CreatedAt = time.Unix(created, 0)
 	return p, nil

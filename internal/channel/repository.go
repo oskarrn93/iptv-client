@@ -151,7 +151,7 @@ func (r *Repository) ListIDs(ctx context.Context, f Filter) ([]int64, error) {
 	return out, rows.Err()
 }
 
-// ListByIDs returns the list fields of the channels with the given IDs, in
+// ListByIDs returns the channels with the given IDs, in
 // the order given. Unknown IDs are skipped. The IDs are bound as one JSON
 // array, so there is no limit on how many can be requested.
 func (r *Repository) ListByIDs(ctx context.Context, ids []int64) ([]Channel, error) {
@@ -165,8 +165,12 @@ func (r *Repository) ListByIDs(ctx context.Context, ids []int64) ([]Channel, err
 	rows, err := r.q.QueryContext(ctx, `
 		SELECT
 			c.id,
+			c.playlist_id,
 			c.name,
 			c.group_title,
+			c.tvg_id,
+			c.tvg_name,
+			c.tvg_logo,
 			EXISTS (SELECT 1 FROM favorites fv WHERE fv.playlist_id = c.playlist_id AND fv.fav_key = c.fav_key)
 		FROM channels c
 		WHERE c.id IN (SELECT value FROM json_each(?))`, string(idList))
@@ -177,7 +181,7 @@ func (r *Repository) ListByIDs(ctx context.Context, ids []int64) ([]Channel, err
 	byID := make(map[int64]Channel, len(ids))
 	for rows.Next() {
 		var c Channel
-		if err := rows.Scan(&c.ID, &c.Name, &c.Group, &c.Favorite); err != nil {
+		if err := rows.Scan(&c.ID, &c.PlaylistID, &c.Name, &c.Group, &c.TvgID, &c.TvgName, &c.TvgLogo, &c.Favorite); err != nil {
 			return nil, err
 		}
 		byID[c.ID] = c
@@ -200,14 +204,17 @@ func (r *Repository) Get(ctx context.Context, id int64) (Channel, error) {
 	var opts string
 	err := r.q.QueryRowContext(ctx, `
 		SELECT
+			c.playlist_id,
 			c.name,
 			c.url,
 			c.group_title,
 			c.tvg_id,
+			c.tvg_name,
+			c.tvg_logo,
 			c.vlc_opts,
 			EXISTS (SELECT 1 FROM favorites fv WHERE fv.playlist_id = c.playlist_id AND fv.fav_key = c.fav_key)
 		FROM channels c
-		WHERE c.id = ?`, id).Scan(&c.Name, &c.URL, &c.Group, &c.TvgID, &opts, &c.Favorite)
+		WHERE c.id = ?`, id).Scan(&c.PlaylistID, &c.Name, &c.URL, &c.Group, &c.TvgID, &c.TvgName, &c.TvgLogo, &opts, &c.Favorite)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Channel{}, fmt.Errorf("channel %d: %w", id, database.ErrNotFound)
 	}
@@ -231,6 +238,51 @@ func (r *Repository) FavoriteKey(ctx context.Context, id int64) (playlistID int6
 		return 0, "", fmt.Errorf("channel %d: %w", id, database.ErrNotFound)
 	}
 	return playlistID, key, err
+}
+
+// GuideNames returns the distinct tvg-ids and names (tvg-name and title) of
+// a playlist's channels, for matching a program guide to them.
+func (r *Repository) GuideNames(ctx context.Context, playlistID int64) (ids, names []string, err error) {
+	rows, err := r.q.QueryContext(ctx, `
+		SELECT DISTINCT tvg_id
+		FROM channels
+		WHERE playlist_id = ?
+		  AND tvg_id <> ''`, playlistID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	rows, err = r.q.QueryContext(ctx, `
+		SELECT tvg_name
+		FROM channels
+		WHERE playlist_id = ?
+		  AND tvg_name <> ''
+		UNION
+		SELECT name
+		FROM channels
+		WHERE playlist_id = ?`, playlistID, playlistID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, nil, err
+		}
+		names = append(names, n)
+	}
+	return ids, names, rows.Err()
 }
 
 // DeleteAllInPlaylist removes a playlist's channels and their search index

@@ -5,6 +5,7 @@ package services
 import (
 	"iptv-client/internal/channel"
 	"iptv-client/internal/database"
+	"iptv-client/internal/epg"
 	"iptv-client/internal/playlist"
 	"iptv-client/internal/setting"
 )
@@ -13,6 +14,7 @@ import (
 type Services struct {
 	Playlists *playlist.Service
 	Channels  *channel.Service
+	Guide     *epg.Service
 	Settings  *setting.Service
 }
 
@@ -22,6 +24,7 @@ func New(db *database.DB) *Services {
 	return &Services{
 		Playlists: playlist.NewService(db, settings),
 		Channels:  channel.NewService(db, settings),
+		Guide:     epg.NewService(db),
 		Settings:  settings,
 	}
 }

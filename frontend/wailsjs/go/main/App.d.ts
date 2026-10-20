@@ -8,6 +8,8 @@ export function AddPlaylistURL(arg1:string,arg2:string):Promise<main.ImportResul
 
 export function CancelImport():Promise<void>;
 
+export function ChannelGuide(arg1:number):Promise<Array<main.Programme>>;
+
 export function ChannelIDs(arg1:main.ChannelQuery):Promise<Array<number>>;
 
 export function Channels(arg1:Array<number>):Promise<Array<main.Channel>>;
@@ -34,6 +36,8 @@ export function OpenLogFolder():Promise<void>;
 
 export function Play(arg1:number):Promise<string>;
 
+export function RefreshGuide(arg1:number):Promise<main.GuideResult>;
+
 export function RefreshPlaylist(arg1:number,arg2:boolean):Promise<main.ImportResult>;
 
 export function RenamePlaylist(arg1:number,arg2:string):Promise<void>;
@@ -43,5 +47,7 @@ export function ResetPlayer():Promise<main.Settings>;
 export function SetFavorite(arg1:number,arg2:boolean):Promise<void>;
 
 export function SetLogLevel(arg1:string):Promise<void>;
+
+export function SetPlaylistGuide(arg1:number,arg2:string):Promise<main.Playlist>;
 
 export function SetUserAgent(arg1:string):Promise<void>;

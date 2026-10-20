@@ -25,9 +25,35 @@
       channels.set(cid, c);
       if (favorite) favorites.add(favKey(c));
     }
-    const p = { id, name, sourceType, source, channelCount: entries.length, lastRefreshedAt: now() };
+    const p = {
+      id,
+      name,
+      sourceType,
+      source,
+      channelCount: entries.length,
+      lastRefreshedAt: now(),
+      guideSource: '',
+      guideCustom: false,
+      guideUpdatedAt: 0,
+    };
     playlists.push(p);
     return p;
+  };
+
+  // Hourly programmes for channels with a tvg-id once the playlist's guide
+  // was loaded. The xss channel's titles carry markup on purpose.
+  const guideFor = (c) => {
+    const p = playlists.find((x) => x.id === c.playlistId);
+    if (!p?.guideSource || !p.guideUpdatedAt || !c.tvgId) return [];
+    const hour = 3600;
+    const base = Math.floor(now() / hour) * hour;
+    const title = c.tvgId === 'xss' ? '<img src=x onerror="window.__xss=2"><b>Evil Show</b>' : `Show ${c.id % 7}`;
+    return [0, 1, 2, 3].map((i) => ({
+      title: i ? `${title} (part ${i + 1})` : title,
+      description: i ? '' : `All about ${title}.`,
+      start: base + i * hour,
+      stop: base + (i + 1) * hour,
+    }));
   };
 
   if (window.__stubSeed) {
@@ -40,7 +66,8 @@
     for (let i = 1; i <= 50000; i++) {
       big.push({ name: `Kanal ${i} HD Ünïcödé`, group: `Group ${groupsOf(i)} Sport & Nyheter`, tvgId: `c${i}` });
     }
-    addPlaylist('Big Test List', 'url', 'http://provider.example/…', big);
+    const bigList = addPlaylist('Big Test List', 'url', 'http://provider.example/…', big);
+    Object.assign(bigList, { guideSource: 'http://epg.example/…', guideUpdatedAt: now() });
     addPlaylist('Small List', 'file', 'C:\\lists\\small.m3u', [
       { name: 'BBC One HD', group: 'UK', tvgId: 'bbc1' },
       { name: 'BBC One SD', group: 'UK', tvgId: 'bbc1' },
@@ -85,7 +112,44 @@
       return ids
         .map((id) => channels.get(id))
         .filter(Boolean)
-        .map((c) => ({ id: c.id, name: c.name, group: c.group, favorite: favorites.has(favKey(c)) }));
+        .map((c) => {
+          const [current] = guideFor(c);
+          return {
+            id: c.id,
+            name: c.name,
+            group: c.group,
+            favorite: favorites.has(favKey(c)),
+            logo: c.tvgId !== '',
+            now: current && { ...current, description: '' },
+          };
+        });
+    },
+    async ChannelGuide(id) {
+      const c = channels.get(id);
+      if (!c) throw 'channel not found';
+      await delay();
+      return guideFor(c);
+    },
+    async SetPlaylistGuide(id, url) {
+      const p = playlist(id);
+      url = url.trim();
+      if (url && !/^https?:\/\/./i.test(url)) throw 'the program guide URL must be an http:// or https:// address';
+      const redacted = (u) => u.replace(/^(https?:\/\/[^/?#]*)[/?#].+$/i, '$1/…');
+      Object.assign(p, { guideSource: url ? redacted(url) : '', guideCustom: !!url, guideUpdatedAt: 0 });
+      window.__calls.push(['SetPlaylistGuide', id, url]);
+      return p;
+    },
+    async RefreshGuide(id) {
+      const p = playlist(id);
+      window.__calls.push(['RefreshGuide', id]);
+      if (!p.guideSource) throw 'this playlist has no program guide URL';
+      for (const n of [5000, 10000]) {
+        await delay(20);
+        emit('import-progress', n);
+      }
+      p.guideUpdatedAt = now();
+      const matched = byPlaylist(id).filter((c) => c.tvgId).length;
+      return { playlist: p, channels: matched, programmes: matched * 4 };
     },
     async SetFavorite(id, on) {
       const c = channels.get(id);

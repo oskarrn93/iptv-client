@@ -12,6 +12,7 @@ import (
 
 	"iptv-client/internal/channel"
 	"iptv-client/internal/database"
+	"iptv-client/internal/epg"
 	"iptv-client/internal/fetch"
 	"iptv-client/internal/m3u"
 	"iptv-client/internal/player"
@@ -150,7 +151,7 @@ func (s *Service) Refresh(ctx context.Context, id int64, force bool, progress fu
 	defer fr.Body.Close()
 
 	var res RefreshResult
-	err = s.replaceChannels(ctx, id, fr.ETag, fr.LastModified, func(insert func(channel.Input) error) error {
+	err = s.replaceChannels(ctx, id, fr.ETag, fr.LastModified, func(insert func(channel.Input) error) (string, error) {
 		pr, err := m3u.Parse(fr.Body, func(e m3u.Entry) error {
 			if player.ValidateURL(e.URL) != nil {
 				res.Skipped++
@@ -171,20 +172,20 @@ func (s *Service) Refresh(ctx context.Context, id int64, force bool, progress fu
 			})
 		})
 		if err != nil && !errors.Is(err, m3u.ErrEmpty) {
-			return err
+			return "", err
 		}
 		if pr.Kind == m3u.KindHLS {
 			// The source itself is one stream.
 			if p.SourceType != SourceURL || player.ValidateURL(p.Source) != nil {
-				return errors.New("this file is a single HLS stream, not a channel list; add it by URL instead")
+				return "", errors.New("this file is a single HLS stream, not a channel list; add it by URL instead")
 			}
 			res.HLS, res.Imported = true, 1
-			return insert(channel.Input{Name: p.Name, URL: p.Source})
+			return "", insert(channel.Input{Name: p.Name, URL: p.Source})
 		}
 		if res.Imported == 0 {
-			return ErrNoChannels
+			return "", ErrNoChannels
 		}
-		return nil
+		return guideURLFromHeader(pr.Header), nil
 	})
 	if err != nil {
 		return RefreshResult{Skipped: res.Skipped}, err
@@ -196,27 +197,133 @@ func (s *Service) Refresh(ctx context.Context, id int64, force bool, progress fu
 }
 
 // replaceChannels atomically replaces all channels of a playlist. produce is
-// called with an insert function and should feed it every channel; if
-// produce returns an error the transaction is rolled back and the previous
-// channels remain. etag/lastModified are stored with the new data.
+// called with an insert function and should feed it every channel, then
+// return the playlist header's guide URL; if produce returns an error the
+// transaction is rolled back and the previous channels remain.
+// etag/lastModified are stored with the new data.
 func (s *Service) replaceChannels(ctx context.Context, playlistID int64, etag, lastModified string,
-	produce func(insert func(channel.Input) error) error) error {
+	produce func(insert func(channel.Input) error) (tvgURL string, err error)) error {
 
 	return s.db.InTx(ctx, func(tx database.Querier) error {
 		playlists := NewRepository(tx)
-		exists, err := playlists.Exists(ctx, playlistID)
+		before, err := playlists.Get(ctx, playlistID)
 		if err != nil {
 			return err
 		}
-		if !exists {
-			return fmt.Errorf("playlist %d: %w", playlistID, database.ErrNotFound)
-		}
-		n, err := channel.NewRepository(tx).ReplaceAllInPlaylist(ctx, playlistID, produce)
+		var tvgURL string
+		n, err := channel.NewRepository(tx).ReplaceAllInPlaylist(ctx, playlistID, func(insert func(channel.Input) error) error {
+			var err error
+			tvgURL, err = produce(insert)
+			return err
+		})
 		if err != nil {
 			return err
 		}
-		return playlists.SaveRefresh(ctx, playlistID, n, etag, lastModified, s.Now())
+		if err := playlists.SaveRefresh(ctx, playlistID, n, etag, lastModified, tvgURL, s.Now()); err != nil {
+			return err
+		}
+		after := before
+		after.TvgURL = tvgURL
+		return syncGuide(ctx, tx, before, after)
 	})
+}
+
+// syncGuide brings the stored guide in line with a change of a playlist's
+// guide source: a new source is due for download, and with none left the
+// old guide is deleted, since it would never be refreshed or cleared.
+func syncGuide(ctx context.Context, tx database.Querier, before, after Playlist) error {
+	switch src := after.GuideSource(); {
+	case src == "":
+		return epg.NewRepository(tx).DeleteAllInPlaylist(ctx, after.ID)
+	case src != before.GuideSource():
+		return NewRepository(tx).MarkGuideStale(ctx, after.ID)
+	}
+	return nil
+}
+
+// ErrNoGuide is returned when refreshing the guide of a playlist that has
+// no guide URL.
+var ErrNoGuide = errors.New("this playlist has no program guide URL")
+
+// SetGuideURL sets the program guide (XMLTV) URL of a playlist. An empty
+// url means the one named in the playlist, if any; if there is none the
+// stored guide is deleted. The new guide is not downloaded: call
+// RefreshGuide.
+func (s *Service) SetGuideURL(ctx context.Context, id int64, url string) error {
+	url = strings.TrimSpace(url)
+	if url != "" && !fetch.IsHTTPURL(url) {
+		return errors.New("the program guide URL must be an http:// or https:// address")
+	}
+	return s.db.InTx(ctx, func(tx database.Querier) error {
+		playlists := NewRepository(tx)
+		before, err := playlists.Get(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := playlists.SetGuideURL(ctx, id, url); err != nil {
+			return err
+		}
+		after := before
+		after.GuideURL = url
+		return syncGuide(ctx, tx, before, after)
+	})
+}
+
+// RefreshGuide downloads a playlist's program guide and replaces the stored
+// one with the programmes of its channels. If it fails, the previous guide
+// is kept. progress, if non-nil, is called with the running programme count.
+func (s *Service) RefreshGuide(ctx context.Context, id int64, progress func(int)) (epg.ImportResult, error) {
+	p, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return epg.ImportResult{}, err
+	}
+	src := p.GuideSource()
+	if src == "" {
+		return epg.ImportResult{}, ErrNoGuide
+	}
+	ua, err := s.settings.UserAgent(ctx)
+	if err != nil {
+		return epg.ImportResult{}, err
+	}
+	// Uncompressed guides of big providers are hundreds of MB.
+	fr, err := fetch.URL(ctx, src, fetch.Options{UserAgent: ua, MaxBytes: epg.MaxUncompressed})
+	if err != nil {
+		return epg.ImportResult{}, fmt.Errorf("program guide: %w", err)
+	}
+	defer fr.Body.Close()
+	var res epg.ImportResult
+	err = s.db.InTx(ctx, func(tx database.Querier) error {
+		ids, names, err := channel.NewRepository(tx).GuideNames(ctx, id)
+		if err != nil {
+			return err
+		}
+		res, err = epg.NewRepository(tx).Import(ctx, id, fr.Body, epg.NewKeys(ids, names), s.Now(), progress)
+		if err != nil {
+			return err
+		}
+		return NewRepository(tx).MarkGuideRefreshed(ctx, id, s.Now())
+	})
+	if err != nil {
+		return epg.ImportResult{}, err
+	}
+	if progress != nil {
+		progress(res.Programmes)
+	}
+	return res, nil
+}
+
+// guideURLFromHeader returns the first http(s) guide URL named in a
+// playlist's #EXTM3U attributes, "" if none. The attribute can hold a
+// comma-separated list; only one guide per playlist is supported.
+func guideURLFromHeader(header map[string]string) string {
+	for _, key := range []string{"url-tvg", "x-tvg-url", "tvg-url"} {
+		for _, u := range strings.Split(header[key], ",") {
+			if u = strings.TrimSpace(u); fetch.IsHTTPURL(u) {
+				return u
+			}
+		}
+	}
+	return ""
 }
 
 // Rename changes a playlist's display name.
@@ -234,7 +341,7 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 		if err := channel.NewRepository(tx).DeleteAllInPlaylist(ctx, id); err != nil {
 			return err
 		}
-		// Favorites go with the playlist row (ON DELETE CASCADE).
+		// Favorites and the guide go with the playlist row (ON DELETE CASCADE).
 		return NewRepository(tx).Delete(ctx, id)
 	})
 }

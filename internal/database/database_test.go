@@ -39,6 +39,10 @@ func TestMigrateUpgradesLegacyVersionTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The legacy migrator only knew migrations 1 and 2.
+	if err := newMigrate(t, d).Migrate(2); err != nil {
+		t.Fatal(err)
+	}
 	// Rewrite the version table as the pre-golang-migrate migrator left it.
 	if _, err := d.ExecContext(ctx, `
 DROP TABLE schema_migrations;
@@ -58,13 +62,13 @@ INSERT INTO schema_migrations(version) VALUES (1), (2);`); err != nil {
 	if err := d.QueryRowContext(ctx, `SELECT version, dirty FROM schema_migrations`).Scan(&version, &dirty); err != nil {
 		t.Fatal(err)
 	}
-	if version != 2 || dirty {
-		t.Fatalf("got version %d dirty %v, want 2 false", version, dirty)
+	if version < 2 || dirty {
+		t.Fatalf("got version %d dirty %v, want at least 2 and false", version, dirty)
 	}
 }
 
-func TestMigrationsDownAndUp(t *testing.T) {
-	d := openTest(t)
+func newMigrate(t *testing.T, d *DB) *migrate.Migrate {
+	t.Helper()
 	src, err := iofs.New(migrationFiles, "migrations")
 	if err != nil {
 		t.Fatal(err)
@@ -77,6 +81,11 @@ func TestMigrationsDownAndUp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return m
+}
+
+func TestMigrationsDownAndUp(t *testing.T) {
+	m := newMigrate(t, openTest(t))
 	if err := m.Down(); err != nil {
 		t.Fatalf("down: %v", err)
 	}

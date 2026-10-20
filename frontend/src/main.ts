@@ -4,6 +4,7 @@ import {
   AddPlaylistFile,
   AddPlaylistURL,
   CancelImport,
+  ChannelGuide,
   ChannelIDs,
   CheckForUpdate,
   ChoosePlayer,
@@ -15,18 +16,33 @@ import {
   ListPlaylists,
   OpenLogFolder,
   Play,
+  RefreshGuide,
   RefreshPlaylist,
   RenamePlaylist,
   ResetPlayer,
   SetFavorite,
   SetLogLevel,
+  SetPlaylistGuide,
   SetUserAgent,
 } from '../wailsjs/go/main/App';
-import type { main } from '../wailsjs/go/models';
+import { main } from '../wailsjs/go/models';
 import { EventsOn } from '../wailsjs/runtime/runtime';
 import { ChannelList } from './channel-list';
-import { confirmDialog, promptDialog, showDialog } from './dialogs';
-import { $, type Child, debounce, errorMessage, formatCount, groupLabel, h, plural, setSelected, timeAgo } from './dom';
+import { confirmDialog, showDialog } from './dialogs';
+import {
+  $,
+  append,
+  type Child,
+  channelLogo,
+  debounce,
+  errorMessage,
+  formatCount,
+  groupLabel,
+  h,
+  plural,
+  setSelected,
+  timeAgo,
+} from './dom';
 import { installErrorHandlers, type Level } from './log';
 import { showMenu } from './menu';
 
@@ -56,6 +72,7 @@ const ui = {
   cancel: $<HTMLButtonElement>('#cancel-import'),
   toasts: $('#toasts'),
   add: $<HTMLButtonElement>('#add-playlist'),
+  details: $('#channel-details'),
 };
 
 // ---------- feedback ----------
@@ -96,7 +113,7 @@ const toggleFavorite = guard(async (channel: main.Channel) => {
   if (state.selection.kind === 'favorites') {
     await loadChannels({ keepScroll: true });
   } else {
-    list.update({ ...channel, favorite: !channel.favorite });
+    list.update(main.Channel.createFrom({ ...channel, favorite: !channel.favorite }));
   }
 });
 
@@ -123,8 +140,94 @@ const list = new ChannelList($('#channels'), {
         action: () => void toggleFavorite(channel),
       },
     ]),
+  onSelect: (channel) => showDetails(channel),
   onError: fail,
 });
+
+// ---------- selected channel details ----------
+
+const clock = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
+const time = (unixSeconds: number): string => clock.format(unixSeconds * 1000);
+
+let detailsChannel: main.Channel | undefined;
+
+/** Shows the selected channel with what is on now and next. */
+const showDetails = (channel: main.Channel | undefined): void => {
+  detailsChannel = channel;
+  ui.details.hidden = !channel;
+  if (!channel) return;
+  renderDetails(channel, null);
+  void loadDetails(channel);
+};
+
+// Debounced: holding an arrow key selects many channels in a row.
+const loadDetails = debounce(async (channel: main.Channel): Promise<void> => {
+  try {
+    const programmes = await ChannelGuide(channel.id);
+    if (channel === detailsChannel) renderDetails(channel, programmes);
+  } catch (error) {
+    if (channel === detailsChannel) renderDetails(channel, []);
+    fail(error);
+  }
+}, 150);
+
+const renderDetails = (channel: main.Channel, programmes: main.Programme[] | null): void => {
+  const now = Date.now() / 1000;
+  const [first, ...rest] = programmes ?? [];
+  const current = first && first.start <= now ? first : undefined;
+  const next = current ? rest : (programmes ?? []);
+  const playlist = state.playlists.find((p) => p.id === state.playlistId);
+  let info: Child[];
+  if (programmes === null) {
+    info = [h('div', { class: 'muted' }, channel.now?.title ?? '…')];
+  } else if (programmes.length === 0) {
+    info = [
+      h(
+        'div',
+        { class: 'muted' },
+        playlist?.guideSource
+          ? 'No program information for this channel.'
+          : 'No program guide. Add an EPG URL with ✎ on the playlist.',
+      ),
+    ];
+  } else {
+    info = [
+      current &&
+        h(
+          'div',
+          { class: 'details-now' },
+          h('span', { class: 'programme-time' }, `${time(current.start)}–${time(current.stop)}`),
+          h('span', { class: 'programme-title', title: current.title }, current.title),
+          h('progress', {
+            max: current.stop - current.start,
+            value: now - current.start,
+            title: `${Math.max(1, Math.round((current.stop - now) / 60))} min left`,
+          }),
+        ),
+      current?.description && h('p', { class: 'details-description', title: current.description }, current.description),
+      next.length > 0 &&
+        h(
+          'div',
+          { class: 'details-next' },
+          ...next.map((p) => h('span', { title: p.title }, `${time(p.start)} ${p.title}`)),
+        ),
+    ];
+  }
+  ui.details.replaceChildren();
+  append(
+    ui.details,
+    channelLogo(channel, 'details-logo'),
+    h('div', { class: 'details-title', title: channel.name }, channel.name),
+    ...info,
+  );
+};
+
+// Programmes end: refresh what is shown every minute.
+setInterval(() => {
+  if (document.hidden) return;
+  list.reloadIfEnded();
+  if (detailsChannel) void loadDetails(detailsChannel);
+}, 60_000);
 
 const selectionLabel = (s: Selection): string =>
   s.kind === 'all' ? 'All channels' : s.kind === 'favorites' ? 'Favorites' : groupLabel(s.name);
@@ -254,7 +357,7 @@ const renderPlaylists = (): void => {
           'span',
           { class: 'item-actions' },
           iconButton('↻', 'Refresh', () => refreshPlaylist(p)),
-          iconButton('✎', 'Rename', () => renamePlaylist(p)),
+          iconButton('✎', 'Edit', () => editPlaylist(p)),
           iconButton('✕', 'Delete', () => deletePlaylist(p)),
         ),
       ),
@@ -300,10 +403,40 @@ const selectPlaylist = guard(async (id: number | null) => {
   if (id !== state.playlistId) return; // the user moved on
   state.groups = groups;
   renderGroups();
+  const p = state.playlists.find((x) => x.id === id);
+  if (p && guideStale(p) && !guideTried.has(p.id) && !state.importing) {
+    guideTried.add(p.id);
+    await refreshGuide(p);
+  }
 });
 
+// ---------- program guide ----------
+
+const GUIDE_MAX_AGE = 12 * 3600; // seconds
+
+const guideStale = (p: main.Playlist): boolean =>
+  p.guideSource !== '' && Date.now() / 1000 - p.guideUpdatedAt > GUIDE_MAX_AGE;
+
+// Playlists whose stale guide was refreshed automatically this session, so
+// a failing guide is not retried (with an error) on every visit.
+const guideTried = new Set<number>();
+
+const refreshGuide = async (p: main.Playlist): Promise<void> => {
+  const result = await runImport(`Updating the program guide of “${p.name}”`, () => RefreshGuide(p.id), 'programme');
+  if (!result) return;
+  setStatus(
+    `Updated the program guide of “${p.name}”: ${plural(result.programmes, 'programme')} ` +
+      `for ${plural(result.channels, 'channel')}`,
+  );
+  await loadPlaylists();
+  if (state.playlistId === p.id) {
+    list.reload();
+    showDetails(detailsChannel);
+  }
+};
+
 /** Runs an import with progress in the status bar; one at a time. */
-const runImport = async (label: string, task: () => Promise<main.ImportResult>): Promise<main.ImportResult | null> => {
+const runImport = async <T>(label: string, task: () => Promise<T>, unit = 'channel'): Promise<T | null> => {
   if (state.importing) {
     toast('Another import is running.');
     return null;
@@ -312,7 +445,7 @@ const runImport = async (label: string, task: () => Promise<main.ImportResult>):
   ui.add.disabled = true;
   ui.cancel.hidden = false;
   setStatus(`${label}…`);
-  const stop = EventsOn('import-progress', (n: number) => setStatus(`${label}… ${plural(n, 'channel')}`));
+  const stop = EventsOn('import-progress', (n: number) => setStatus(`${label}… ${plural(n, unit)}`));
   try {
     return await task();
   } catch (error) {
@@ -339,13 +472,16 @@ const addPlaylist = async (): Promise<void> => {
     autocomplete: 'off',
     spellcheck: false,
   });
+  const guide = guideInput();
   const choice = await showDialog(
     'Add playlist',
     [
       h('label', null, 'Name', name),
       h('label', null, 'Playlist URL', url),
       h('p', { class: 'hint' }, 'Or load an .m3u / .m3u8 file from this computer.'),
-      h('p', { class: 'hint' }, 'The URL is stored unencrypted on this computer.'),
+      h('label', null, 'Program guide (EPG) URL', guide),
+      h('p', { class: 'hint' }, 'Optional: an XMLTV guide, if the playlist doesn’t name one.'),
+      h('p', { class: 'hint' }, 'URLs are stored unencrypted on this computer.'),
     ],
     [
       { label: 'Cancel', value: '' },
@@ -359,7 +495,7 @@ const addPlaylist = async (): Promise<void> => {
         url.setCustomValidity('');
         return false;
       }
-      return true;
+      return checkGuideURL(guide);
     },
   );
   if (!choice) return;
@@ -372,8 +508,32 @@ const addPlaylist = async (): Promise<void> => {
     return;
   }
   setStatus(`Added “${result.playlist.name}”: ${describeImport(result)}`);
+  if (guide.value.trim()) {
+    try {
+      await SetPlaylistGuide(result.playlist.id, guide.value.trim());
+    } catch (error) {
+      fail(error);
+    }
+  }
   await loadPlaylists();
-  await selectPlaylist(result.playlist.id);
+  await selectPlaylist(result.playlist.id); // also loads the guide
+};
+
+const guideInput = (): HTMLInputElement =>
+  h('input', {
+    type: 'url',
+    placeholder: 'https://provider.example/xmltv.php?…  (.xml or .xml.gz)',
+    autocomplete: 'off',
+    spellcheck: false,
+  });
+
+const checkGuideURL = (input: HTMLInputElement): boolean => {
+  const value = input.value.trim();
+  if (!value || /^https?:\/\/./i.test(value)) return true;
+  input.setCustomValidity('Enter an http:// or https:// address.');
+  input.reportValidity();
+  input.setCustomValidity('');
+  return false;
 };
 
 const refreshPlaylist = async (p: main.Playlist, force = false): Promise<void> => {
@@ -403,13 +563,71 @@ const refreshPlaylist = async (p: main.Playlist, force = false): Promise<void> =
     renderGroups();
     await loadChannels();
   }
+  // A refresh asks for fresh data, and the playlist may name a new guide.
+  // An unchanged playlist can't, and its channels still match the guide.
+  const updated = state.playlists.find((x) => x.id === p.id);
+  if (updated?.guideSource && (!result.notModified || guideStale(updated))) await refreshGuide(updated);
 };
 
-const renamePlaylist = guard(async (p: main.Playlist) => {
-  const name = await promptDialog('Rename playlist', 'Name', p.name);
-  if (!name || name === p.name) return;
-  await RenamePlaylist(p.id, name);
+const editPlaylist = guard(async (p: main.Playlist) => {
+  const name = h('input', { type: 'text', value: p.name, required: true, autocomplete: 'off', spellcheck: false });
+  const guide = guideInput();
+  let useDefault = false;
+  const guideStatus = h('p', { class: 'hint' });
+  const reset = h('button', { type: 'button', class: 'small' }, 'Use the playlist’s guide');
+  const renderGuide = () => {
+    // Only the redacted URL is known here: it may contain credentials.
+    guideStatus.textContent = useDefault
+      ? 'The guide named in the playlist (if any) will be used.'
+      : p.guideCustom
+        ? `Current guide: ${p.guideSource}. Enter a new URL to replace it.`
+        : p.guideSource
+          ? `The playlist names a guide: ${p.guideSource}. Enter a URL to use another.`
+          : 'No guide yet. Enter an XMLTV URL to show what is on.';
+    reset.hidden = !p.guideCustom || useDefault;
+  };
+  reset.addEventListener('click', () => {
+    useDefault = true;
+    guide.value = '';
+    renderGuide();
+  });
+  renderGuide();
+
+  let reload = false;
+  const choice = await showDialog(
+    'Edit playlist',
+    [
+      h('label', null, 'Name', name),
+      h('label', null, 'Program guide (EPG) URL', guide),
+      guideStatus,
+      h('div', { class: 'row' }, reset),
+    ],
+    [
+      { label: 'Cancel', value: '' },
+      { label: 'Save', value: 'save', kind: 'primary' },
+    ],
+    async () => {
+      if (!checkGuideURL(guide)) return false;
+      try {
+        const newName = name.value.trim();
+        if (newName && newName !== p.name) await RenamePlaylist(p.id, newName);
+        const url = guide.value.trim();
+        if (url || useDefault) {
+          const updated = await SetPlaylistGuide(p.id, url);
+          reload = updated.guideSource !== '';
+        }
+        return true;
+      } catch (error) {
+        fail(error);
+        return false;
+      }
+    },
+  );
+  if (!choice) return;
   await loadPlaylists();
+  const updated = state.playlists.find((x) => x.id === p.id);
+  if (reload && updated) await refreshGuide(updated);
+  else if (state.playlistId === p.id) showDetails(detailsChannel);
 });
 
 const deletePlaylist = guard(async (p: main.Playlist) => {
