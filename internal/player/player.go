@@ -13,8 +13,8 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -85,28 +85,13 @@ func SanitizeOptions(opts map[string]string) map[string]string {
 	return out
 }
 
-// Args builds the argument list for playing a stream with the player at
-// exe. It re-validates its inputs, so callers cannot accidentally bypass the
-// allowlists.
-func Args(exe, title, streamURL string, opts map[string]string) ([]string, error) {
-	p, err := ForExecutable(exe)
-	if err != nil {
-		return nil, err
-	}
-	if err := ValidateURL(streamURL); err != nil {
-		return nil, err
-	}
-	return p.args(cleanTitle(title), streamURL, SanitizeOptions(opts)), nil
-}
-
 // Launch starts the player at exe detached from this process and returns
 // once it has started. The child is reaped in the background.
 func Launch(exe, title, streamURL string, opts map[string]string) error {
-	args, err := Args(exe, title, streamURL, opts)
+	cmd, err := command(runtime.GOOS, exe, title, streamURL, opts)
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(exe, args...)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("starting %s: %w", filepath.Base(exe), err)
 	}

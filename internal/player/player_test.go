@@ -79,7 +79,7 @@ func TestSanitizeOptions(t *testing.T) {
 	}
 }
 
-func TestArgs(t *testing.T) {
+func TestCommand(t *testing.T) {
 	const stream = "http://example.com/1.ts"
 	opts := map[string]string{
 		"http-user-agent": "UA",
@@ -87,24 +87,19 @@ func TestArgs(t *testing.T) {
 		"network-caching": "1000",
 		"sout":            "#file{dst=x}",
 	}
+	vlcArgs := []string{
+		stream,
+		":meta-title=BBC One HD",
+		":http-referrer=http://r/",
+		":http-user-agent=UA",
+		":network-caching=1000",
+	}
 	tests := []struct {
 		exe  string
 		want []string
 	}{
-		{filepath.Join("Program Files", "VideoLAN", "VLC", "vlc.exe"), []string{
-			"--meta-title=BBC One HD",
-			"--http-referrer=http://r/",
-			"--http-user-agent=UA",
-			"--network-caching=1000",
-			stream,
-		}},
-		{"/Applications/VLC.app/Contents/MacOS/VLC", []string{
-			"--meta-title=BBC One HD",
-			"--http-referrer=http://r/",
-			"--http-user-agent=UA",
-			"--network-caching=1000",
-			stream,
-		}},
+		{filepath.Join("Program Files", "VideoLAN", "VLC", "vlc.exe"), vlcArgs},
+		{"/Applications/VLC.app/Contents/MacOS/VLC", vlcArgs},
 		{"/usr/bin/mpv", []string{
 			"--force-media-title=BBC One HD",
 			"--referrer=http://r/",
@@ -122,21 +117,21 @@ func TestArgs(t *testing.T) {
 		{filepath.Join("Program Files", "DAUM", "PotPlayer", "PotPlayerMini64.exe"), []string{stream}},
 	}
 	for _, tt := range tests {
-		got, err := Args(tt.exe, "BBC One\x07 HD", stream, opts)
+		cmd, err := command("linux", tt.exe, "BBC One\x07 HD", stream, opts)
 		if err != nil {
-			t.Errorf("Args(%q) error: %v", tt.exe, err)
+			t.Errorf("command(%q) error: %v", tt.exe, err)
 			continue
 		}
-		if !reflect.DeepEqual(got, tt.want) {
-			t.Errorf("Args(%q) = %q, want %q", tt.exe, got, tt.want)
+		if got := cmd.Args[1:]; !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("command(%q) args = %q, want %q", tt.exe, got, tt.want)
 		}
 	}
 
-	if _, err := Args("vlc", "x", "--lua-intf=evil", nil); err == nil {
-		t.Error("Args accepted an option as the stream URL")
+	if _, err := command("linux", "vlc", "x", "--lua-intf=evil", nil); err == nil {
+		t.Error("command accepted an option as the stream URL")
 	}
-	if _, err := Args("cmd.exe", "x", stream, nil); err == nil {
-		t.Error("Args accepted an unsupported executable")
+	if _, err := command("linux", "cmd.exe", "x", stream, nil); err == nil {
+		t.Error("command accepted an unsupported executable")
 	}
 }
 
