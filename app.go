@@ -467,9 +467,10 @@ func (a *App) Channels(ids []int64) (_ []Channel, err error) {
 	for _, c := range cs {
 		refs = append(refs, guideRef(c))
 	}
-	guide, err := svc.Guide.Current(ctx, refs)
-	if err != nil {
-		return nil, err
+	guide, gerr := svc.Guide.Current(ctx, refs)
+	if gerr != nil {
+		// The guide is decoration; still show the channels.
+		a.log.WarnContext(ctx, "cannot look up the program guide", "err", gerr)
 	}
 	out := make([]Channel, 0, len(cs))
 	for _, c := range cs {
