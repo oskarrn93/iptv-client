@@ -24,6 +24,7 @@ import {
   SetLogLevel,
   SetPlaylistGuide,
   SetAudioLanguages,
+  SetPlaylistURL,
   SetUserAgent,
 } from '../wailsjs/go/main/App';
 import { main } from '../wailsjs/go/models';
@@ -496,7 +497,7 @@ const addPlaylist = async (): Promise<void> => {
         url.setCustomValidity('');
         return false;
       }
-      return checkGuideURL(guide);
+      return checkHTTPURL(guide);
     },
   );
   if (!choice) return;
@@ -528,7 +529,7 @@ const guideInput = (): HTMLInputElement =>
     spellcheck: false,
   });
 
-const checkGuideURL = (input: HTMLInputElement): boolean => {
+const checkHTTPURL = (input: HTMLInputElement): boolean => {
   const value = input.value.trim();
   if (!value || /^https?:\/\/./i.test(value)) return true;
   input.setCustomValidity('Enter an http:// or https:// address.');
@@ -553,6 +554,11 @@ const refreshPlaylist = async (p: main.Playlist, force = false): Promise<void> =
     return;
   }
   setStatus(result.notModified ? `“${p.name}” is already up to date` : `Refreshed “${p.name}”: ${describeImport(result)}`);
+  await reloadAfterImport(p, result);
+};
+
+/** Shows the result of a refresh or URL change of playlist p. */
+const reloadAfterImport = async (p: main.Playlist, result: main.ImportResult): Promise<void> => {
   // Channel IDs change on refresh, so reload everything for this playlist.
   const reload = state.playlistId === p.id && !result.notModified;
   const [, groups] = await Promise.all([loadPlaylists(), reload ? ListGroups(p.id) : null]);
@@ -572,6 +578,14 @@ const refreshPlaylist = async (p: main.Playlist, force = false): Promise<void> =
 
 const editPlaylist = guard(async (p: main.Playlist) => {
   const name = h('input', { type: 'text', value: p.name, required: true, autocomplete: 'off', spellcheck: false });
+  const isURL = p.sourceType === 'url';
+  const source = h('input', {
+    type: 'url',
+    name: 'source',
+    placeholder: 'https://provider.example/get.php?username=…',
+    autocomplete: 'off',
+    spellcheck: false,
+  });
   const guide = guideInput();
   let useDefault = false;
   const guideStatus = h('p', { class: 'hint' });
@@ -599,6 +613,12 @@ const editPlaylist = guard(async (p: main.Playlist) => {
     'Edit playlist',
     [
       h('label', null, 'Name', name),
+      ...(isURL
+        ? [
+            h('label', null, 'Playlist URL', source),
+            h('p', { class: 'hint' }, `Current: ${p.source}. Enter a new URL to replace it; the playlist is downloaded again.`),
+          ]
+        : []),
       h('label', null, 'Program guide (EPG) URL', guide),
       guideStatus,
       h('div', { class: 'row' }, reset),
@@ -608,7 +628,7 @@ const editPlaylist = guard(async (p: main.Playlist) => {
       { label: 'Save', value: 'save', kind: 'primary' },
     ],
     async () => {
-      if (!checkGuideURL(guide)) return false;
+      if (!checkHTTPURL(source) || !checkHTTPURL(guide)) return false;
       try {
         const newName = name.value.trim();
         if (newName && newName !== p.name) await RenamePlaylist(p.id, newName);
@@ -627,7 +647,17 @@ const editPlaylist = guard(async (p: main.Playlist) => {
   if (!choice) return;
   await loadPlaylists();
   const updated = state.playlists.find((x) => x.id === p.id);
-  if (reload && updated) await refreshGuide(updated);
+  const url = source.value.trim();
+  if (url && updated) {
+    // Also loads the guide, which the new playlist may name.
+    const result = await runImport(`Importing “${updated.name}” from the new URL`, () => SetPlaylistURL(p.id, url));
+    if (!result) {
+      if (reload) await refreshGuide(updated); // the guide change was saved
+      return;
+    }
+    setStatus(`Changed the URL of “${updated.name}”: ${describeImport(result)}`);
+    await reloadAfterImport(updated, result);
+  } else if (reload && updated) await refreshGuide(updated);
   else if (state.playlistId === p.id) showDetails(detailsChannel);
 });
 

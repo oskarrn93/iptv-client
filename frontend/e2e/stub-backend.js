@@ -190,6 +190,19 @@
       p.lastRefreshedAt = now();
       return { playlist: p, imported: p.channelCount, skipped: 0, notModified: false, tooSoonMinutes: 0 };
     },
+    async SetPlaylistURL(id, url) {
+      const p = playlist(id);
+      url = url.trim();
+      window.__calls.push(['SetPlaylistURL', id, url]);
+      if (!/^https?:\/\/./i.test(url)) throw 'the playlist URL must be an http:// or https:// address';
+      if (p.sourceType !== 'url') throw 'this playlist is loaded from a file, not a URL';
+      for (const n of [1000, 2000]) {
+        await delay(20);
+        emit('import-progress', n);
+      }
+      Object.assign(p, { source: url.replace(/^(https?:\/\/[^/?#]*)[/?#].+$/i, '$1/…'), lastRefreshedAt: now() });
+      return { playlist: p, imported: p.channelCount, skipped: 0, notModified: false, tooSoonMinutes: 0 };
+    },
     async CancelImport() {},
     async GetSettings() {
       return {

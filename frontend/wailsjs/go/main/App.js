@@ -102,6 +102,10 @@ export function SetPlaylistGuide(arg1, arg2) {
   return window['go']['main']['App']['SetPlaylistGuide'](arg1, arg2);
 }
 
+export function SetPlaylistURL(arg1, arg2) {
+  return window['go']['main']['App']['SetPlaylistURL'](arg1, arg2);
+}
+
 export function SetUserAgent(arg1) {
   return window['go']['main']['App']['SetUserAgent'](arg1);
 }
