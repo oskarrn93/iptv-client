@@ -8,6 +8,10 @@ import { fileURLToPath } from 'node:url';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const dist = join(here, '..', 'dist');
+const logo = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+  'base64',
+);
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
 
 // scripts: file names in e2e/, loaded in order before the app.
@@ -15,6 +19,11 @@ export async function serve(scripts) {
   const server = createServer(async (req, res) => {
     try {
       const path = new URL(req.url, 'http://x').pathname;
+      // Channel logos come from Go in the app.
+      if (path.startsWith('/logo/')) {
+        res.writeHead(200, { 'content-type': 'image/png' }).end(logo);
+        return;
+      }
       const script = scripts.find((s) => path === `/e2e/${s}`);
       if (script) {
         res.writeHead(200, { 'content-type': types['.js'] }).end(await readFile(join(here, script)));

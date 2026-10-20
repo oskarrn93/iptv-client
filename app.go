@@ -16,8 +16,10 @@ import (
 	"iptv-client/internal/channel"
 	"iptv-client/internal/database"
 	"iptv-client/internal/desktop"
+	"iptv-client/internal/epg"
 	"iptv-client/internal/fetch"
 	"iptv-client/internal/logging"
+	"iptv-client/internal/logo"
 	"iptv-client/internal/player"
 	"iptv-client/internal/playlist"
 	"iptv-client/internal/services"
@@ -40,6 +42,7 @@ type App struct {
 	uiLog    *logging.UI
 	imports  importGuard
 	updater  *update.Updater
+	logos    *logo.Cache // nil until the database is open
 }
 
 // NewApp creates the application. It logs to log, whose level is
@@ -67,6 +70,7 @@ func (a *App) startup(ctx context.Context) {
 		if db, err = database.Open(ctx, path); err == nil {
 			a.db = db
 			a.svc = services.New(db)
+			a.logos = logo.New(filepath.Join(filepath.Dir(path), "logos"))
 			a.started(ctx)
 			return
 		}
@@ -86,6 +90,9 @@ func (a *App) started(ctx context.Context) {
 	go func() {
 		if s, err := a.svc.Settings.Get(ctx); err == nil {
 			a.log.InfoContext(ctx, "player", "name", s.PlayerName, "chosen", s.PlayerOverride, "found", s.PlayerError == nil)
+		}
+		if err := a.logos.Prune(); err != nil {
+			a.log.WarnContext(ctx, "cannot prune the logo cache", "err", err)
 		}
 	}()
 }
@@ -127,6 +134,7 @@ func (a *App) call(op string, attrs ...slog.Attr) (ctx context.Context, end func
 func expectedError(err error) bool {
 	return errors.Is(err, errImportRunning) ||
 		errors.Is(err, database.ErrNotFound) || errors.Is(err, errNoDatabase) ||
+		errors.Is(err, playlist.ErrNoGuide) ||
 		errors.Is(err, context.Canceled)
 }
 
@@ -140,6 +148,9 @@ type Playlist struct {
 	Source          string `json:"source"` // redacted for URLs
 	ChannelCount    int    `json:"channelCount"`
 	LastRefreshedAt int64  `json:"lastRefreshedAt"` // unix seconds, 0 = never
+	GuideSource     string `json:"guideSource"`     // redacted program guide URL, "" = none
+	GuideCustom     bool   `json:"guideCustom"`     // the guide URL was set by the user
+	GuideUpdatedAt  int64  `json:"guideUpdatedAt"`  // unix seconds, 0 = never
 }
 
 // Group is a channel group with its size.
@@ -155,6 +166,18 @@ type Channel struct {
 	Name     string `json:"name"`
 	Group    string `json:"group"`
 	Favorite bool   `json:"favorite"`
+	// Logo means a logo URL is known; the UI loads it from /logo/<id>,
+	// served by serveLogo, which may still fail.
+	Logo bool       `json:"logo"`
+	Now  *Programme `json:"now"` // what is on, from the program guide
+}
+
+// Programme is a program guide entry. Times are unix seconds.
+type Programme struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Start       int64  `json:"start"`
+	Stop        int64  `json:"stop"`
 }
 
 // ChannelQuery selects channels for the list.
@@ -175,6 +198,13 @@ type ImportResult struct {
 	// TooSoonMinutes > 0 means the refresh was refused by the rate limit;
 	// the UI may offer to force it.
 	TooSoonMinutes int `json:"tooSoonMinutes"`
+}
+
+// GuideResult reports a program guide refresh.
+type GuideResult struct {
+	Playlist   Playlist `json:"playlist"`
+	Channels   int      `json:"channels"`   // guide channels matched
+	Programmes int      `json:"programmes"` // programmes stored
 }
 
 // Settings is the settings dialog state.
@@ -301,6 +331,57 @@ func (a *App) runImport(op string, attrs []slog.Attr,
 	return ImportResult{Playlist: &dto, Imported: res.Imported, Skipped: res.Skipped, NotModified: res.NotModified}, nil
 }
 
+// SetPlaylistGuide sets a playlist's program guide (XMLTV) URL; "" means
+// the one named in the playlist. Call RefreshGuide to download it.
+func (a *App) SetPlaylistGuide(id int64, url string) (_ Playlist, err error) {
+	ctx, end := a.call("set_playlist_guide", slog.Int64("playlist_id", id), slog.Bool("custom", strings.TrimSpace(url) != ""))
+	defer end(&err)
+	svc, err := a.ready()
+	if err != nil {
+		return Playlist{}, err
+	}
+	if err := svc.Playlists.SetGuideURL(ctx, id, url); err != nil {
+		return Playlist{}, err
+	}
+	p, err := svc.Playlists.Get(ctx, id)
+	if err != nil {
+		return Playlist{}, err
+	}
+	a.log.InfoContext(ctx, "guide URL changed")
+	return toPlaylist(p), nil
+}
+
+// RefreshGuide downloads a playlist's program guide. Like an import it runs
+// one at a time, reports ImportProgressEvent (programmes) and can be
+// cancelled; on failure the previous guide is kept.
+func (a *App) RefreshGuide(id int64) (_ GuideResult, err error) {
+	ctx, end := a.call("refresh_guide", slog.Int64("playlist_id", id))
+	defer end(&err)
+	svc, err := a.ready()
+	if err != nil {
+		return GuideResult{}, err
+	}
+	ctx, done, err := a.imports.begin(ctx)
+	if err != nil {
+		return GuideResult{}, err
+	}
+	defer done()
+	start := time.Now()
+	a.log.InfoContext(ctx, "guide refresh started")
+	res, err := svc.Playlists.RefreshGuide(ctx, id, a.progress)
+	if err != nil {
+		return GuideResult{}, importError(err)
+	}
+	a.log.InfoContext(ctx, "guide refresh finished", "channels", res.Channels, "programmes", res.Programmes,
+		"took", time.Since(start).Round(time.Millisecond))
+	// The import has committed: a cancel arriving now must not fail it.
+	p, err := svc.Playlists.Get(context.WithoutCancel(ctx), id)
+	if err != nil {
+		return GuideResult{}, err
+	}
+	return GuideResult{Playlist: toPlaylist(p), Channels: res.Channels, Programmes: res.Programmes}, nil
+}
+
 // CancelImport stops a running add/refresh. The previous data is kept.
 func (a *App) CancelImport() {
 	a.log.InfoContext(a.ctx, "import cancel requested")
@@ -382,9 +463,48 @@ func (a *App) Channels(ids []int64) (_ []Channel, err error) {
 	if err != nil {
 		return nil, err
 	}
+	refs := make([]epg.Ref, 0, len(cs))
+	for _, c := range cs {
+		refs = append(refs, guideRef(c))
+	}
+	guide, err := svc.Guide.Current(ctx, refs)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]Channel, 0, len(cs))
 	for _, c := range cs {
-		out = append(out, Channel{ID: c.ID, Name: c.Name, Group: c.Group, Favorite: c.Favorite})
+		info := guide[c.ID]
+		ch := Channel{ID: c.ID, Name: c.Name, Group: c.Group, Favorite: c.Favorite, Logo: c.TvgLogo != "" || info.Icon != ""}
+		if len(info.Programmes) > 0 {
+			p := toProgramme(info.Programmes[0])
+			p.Description = "" // the list doesn't show it
+			ch.Now = &p
+		}
+		out = append(out, ch)
+	}
+	return out, nil
+}
+
+// ChannelGuide returns what is on a channel now and next, empty if the
+// program guide has nothing for it.
+func (a *App) ChannelGuide(channelID int64) (_ []Programme, err error) {
+	ctx, end := a.call("channel_guide", slog.Int64("channel_id", channelID))
+	defer end(&err)
+	svc, err := a.ready()
+	if err != nil {
+		return nil, err
+	}
+	c, err := svc.Channels.Get(ctx, channelID)
+	if err != nil {
+		return nil, err
+	}
+	info, _, err := svc.Guide.Upcoming(ctx, guideRef(c), 4)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Programme, 0, len(info.Programmes))
+	for _, p := range info.Programmes {
+		out = append(out, toProgramme(p))
 	}
 	return out, nil
 }
@@ -628,10 +748,23 @@ func toPlaylist(p playlist.Playlist) Playlist {
 	if !p.LastRefreshedAt.IsZero() {
 		refreshed = p.LastRefreshedAt.Unix()
 	}
+	var guideRefreshed int64
+	if !p.GuideRefreshedAt.IsZero() {
+		guideRefreshed = p.GuideRefreshedAt.Unix()
+	}
 	return Playlist{
 		ID: p.ID, Name: p.Name, SourceType: string(p.SourceType), Source: p.DisplaySource(),
 		ChannelCount: p.ChannelCount, LastRefreshedAt: refreshed,
+		GuideSource: p.DisplayGuideSource(), GuideCustom: p.GuideURL != "", GuideUpdatedAt: guideRefreshed,
 	}
+}
+
+func guideRef(c channel.Channel) epg.Ref {
+	return epg.Ref{ChannelID: c.ID, PlaylistID: c.PlaylistID, TvgID: c.TvgID, TvgName: c.TvgName, Name: c.Name}
+}
+
+func toProgramme(p epg.Programme) Programme {
+	return Programme{Title: p.Title, Description: p.Description, Start: p.Start.Unix(), Stop: p.Stop.Unix()}
 }
 
 // uiError replaces an error's message for the UI but keeps it for errors.Is.

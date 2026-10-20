@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"embed"
+	"net/http"
 	"os"
 
 	"github.com/wailsapp/wails/v2"
@@ -34,6 +35,8 @@ func main() {
 		MinHeight: 480,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
+			// Called for paths not in assets.
+			Handler: http.HandlerFunc(app.serveLogo),
 		},
 		BackgroundColour:   &options.RGBA{R: 24, G: 26, B: 31, A: 255},
 		OnStartup:          app.startup,

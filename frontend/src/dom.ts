@@ -60,6 +60,22 @@ export const formatCount = (n: number): string => number.format(n);
 /** "1 channel", "1,234 channels". */
 export const plural = (n: number, word: string): string => `${formatCount(n)} ${word}${n === 1 ? '' : 's'}`;
 
+/**
+ * A channel's logo, served by the app at /logo/<id> (never the logo URL
+ * itself, see serveLogo in Go), or an empty box of the same size. A logo that
+ * fails to load is hidden.
+ */
+export const channelLogo = (channel: { id: number; logo: boolean }, className: string): HTMLElement =>
+  channel.logo
+    ? h('img', {
+        class: className,
+        src: `/logo/${channel.id}`,
+        alt: '',
+        decoding: 'async',
+        onerror: (e: Event) => (e.target as HTMLElement).classList.add('broken'),
+      })
+    : h('span', { class: className });
+
 /** A channel group's display name. */
 export const groupLabel = (name: string): string => name || 'Ungrouped';
 

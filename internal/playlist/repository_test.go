@@ -43,7 +43,7 @@ func TestRepositoryCRUD(t *testing.T) {
 	if err != nil || p.Name != "Renamed" || p.SourceType != SourceURL {
 		t.Fatalf("Get = %+v, %v", p, err)
 	}
-	if err := r.SaveRefresh(ctx, id, 5, "etag1", "lm1", now); err != nil {
+	if err := r.SaveRefresh(ctx, id, 5, "etag1", "lm1", "", now); err != nil {
 		t.Fatal(err)
 	}
 	if p, _ := r.Get(ctx, id); p.ChannelCount != 5 || p.ETag != "etag1" || p.LastModified != "lm1" || p.LastRefreshedAt.IsZero() {

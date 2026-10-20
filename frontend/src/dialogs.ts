@@ -62,12 +62,3 @@ export const confirmDialog = async (
     { label: 'Cancel', value: '' },
     { label: okLabel, value: 'ok', kind },
   ])) === 'ok';
-
-export const promptDialog = async (title: string, label: string, value: string): Promise<string | null> => {
-  const input = h('input', { type: 'text', value, required: true, autocomplete: 'off', spellcheck: false });
-  const result = await showDialog(title, [h('label', null, label, input)], [
-    { label: 'Cancel', value: '' },
-    { label: 'Save', value: 'ok', kind: 'primary' },
-  ]);
-  return result === 'ok' ? input.value.trim() : null;
-};

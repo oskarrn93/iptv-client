@@ -1,10 +1,30 @@
 export namespace main {
 	
+	export class Programme {
+	    title: string;
+	    description: string;
+	    start: number;
+	    stop: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Programme(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.description = source["description"];
+	        this.start = source["start"];
+	        this.stop = source["stop"];
+	    }
+	}
 	export class Channel {
 	    id: number;
 	    name: string;
 	    group: string;
 	    favorite: boolean;
+	    logo: boolean;
+	    now?: Programme;
 	
 	    static createFrom(source: any = {}) {
 	        return new Channel(source);
@@ -16,7 +36,27 @@ export namespace main {
 	        this.name = source["name"];
 	        this.group = source["group"];
 	        this.favorite = source["favorite"];
+	        this.logo = source["logo"];
+	        this.now = this.convertValues(source["now"], Programme);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class ChannelQuery {
 	    playlistId: number;
@@ -59,6 +99,9 @@ export namespace main {
 	    source: string;
 	    channelCount: number;
 	    lastRefreshedAt: number;
+	    guideSource: string;
+	    guideCustom: boolean;
+	    guideUpdatedAt: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Playlist(source);
@@ -72,7 +115,44 @@ export namespace main {
 	        this.source = source["source"];
 	        this.channelCount = source["channelCount"];
 	        this.lastRefreshedAt = source["lastRefreshedAt"];
+	        this.guideSource = source["guideSource"];
+	        this.guideCustom = source["guideCustom"];
+	        this.guideUpdatedAt = source["guideUpdatedAt"];
 	    }
+	}
+	export class GuideResult {
+	    playlist: Playlist;
+	    channels: number;
+	    programmes: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new GuideResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.playlist = this.convertValues(source["playlist"], Playlist);
+	        this.channels = source["channels"];
+	        this.programmes = source["programmes"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class ImportResult {
 	    playlist?: Playlist;
@@ -112,6 +192,7 @@ export namespace main {
 		    return a;
 		}
 	}
+	
 	
 	export class Settings {
 	    playerPath: string;

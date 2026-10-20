@@ -53,9 +53,41 @@ try {
   // Untrusted names render as text.
   const evil = await page.$$eval('.channel-name', (els) => els.map((e) => e.textContent).find((t) => t.includes('Evil')));
   check('HTML in channel name shown as text', evil?.startsWith('<img src=x'), evil);
-  check('no script ran from playlist data', await page.evaluate(() => window.__xss === undefined && !document.querySelector('#channels img')));
+  check(
+    'no script ran from playlist data',
+    await page.evaluate(() => window.__xss === undefined && !document.querySelector('#channels img:not(.channel-logo)')),
+  );
   const bold = await page.$$eval('#groups .item-name', (els) => els.map((e) => e.textContent));
   check('HTML in group name shown as text', bold.includes('<b>Bold Group</b>'));
+
+  // Logos are served by the app, never loaded from the playlist's URLs.
+  await waitFor(() => document.querySelector('.channel-row img.channel-logo')?.complete);
+  const logos = await page.$$eval('.channel-row img.channel-logo', (els) => els.map((e) => e.getAttribute('src')));
+  check('channel logos load from the app', logos.length > 5 && logos.every((src) => /^\/logo\/\d+$/.test(src)), logos[0]);
+  check(
+    'logos render',
+    await page.evaluate(() => [...document.querySelectorAll('img.channel-logo')].every((i) => i.naturalWidth > 0)),
+  );
+
+  // Program guide: on now in the list, now and next for the selection.
+  const onNow = await page.$$eval('.channel-now', (els) => els.map((e) => e.textContent));
+  check('list shows what is on', onNow.includes('<img src=x onerror="window.__xss=2"><b>Evil Show</b>') && onNow.includes('Show 3'), onNow.slice(0, 3).join('|'));
+  await waitFor(() => document.querySelector('#channel-details .details-next'));
+  const details = await page.evaluate(() => ({
+    title: document.querySelector('#channel-details .details-title')?.textContent,
+    now: document.querySelector('#channel-details .programme-title')?.textContent,
+    description: document.querySelector('#channel-details .details-description')?.textContent,
+    next: document.querySelectorAll('#channel-details .details-next span').length,
+    progress: !!document.querySelector('#channel-details progress'),
+  }));
+  check(
+    'details show now and next as text',
+    details.title.includes('Evil Channel') && details.now.startsWith('<img src=x') && details.description.startsWith('All about') &&
+      details.next === 3 && details.progress,
+    JSON.stringify(details),
+  );
+  check('no script ran from guide data', await page.evaluate(() => window.__xss === undefined && !document.querySelector('#channel-details b')));
+  await shot('01b-guide');
 
   // Virtualization.
   const rows = await page.$$eval('.channel-row', (els) => els.length);
@@ -178,9 +210,10 @@ try {
   check('rate-limited refresh asks first', (await page.textContent('dialog[open]')).includes('42 minutes'));
   await shot('04-refresh-confirm');
   await page.click('dialog[open] button:has-text("Refresh anyway")');
-  await waitFor(() => document.querySelector('#status')?.textContent?.startsWith('Refreshed'));
+  await waitFor(() => document.querySelector('#status')?.textContent?.startsWith('Updated the program guide'));
   const forced = await page.evaluate(() => window.__calls.filter(([m]) => m === 'RefreshPlaylist').map(([, , f]) => f));
   check('refresh anyway forces', forced.join() === 'false,true', forced.join());
+  check('refresh also updates the guide', await page.evaluate(() => window.__calls.some(([m]) => m === 'RefreshGuide')));
 
   // Settings.
   await page.click('#settings-button');
@@ -256,20 +289,34 @@ try {
   await page.fill('dialog[open] input[type=text]', 'My Provider');
   await page.fill('dialog[open] input[type=url]', 'https://provider.example/get.php');
   await page.click('dialog[open] button:has-text("Add URL")');
-  await waitFor(() => document.querySelector('#status')?.textContent?.includes('channels'));
+  await waitFor(() => /^Importing playlist… .*channels/.test(document.querySelector('#status')?.textContent));
   check('import progress shown', !(await page.isHidden('#cancel-import')));
   await waitFor(() => document.querySelector('#status')?.textContent?.startsWith('Added'));
   check('new playlist selected', (await page.textContent('#playlists .selected .item-name')) === 'My Provider');
   check('import summary', (await page.textContent('#status')).includes('3 skipped'), await page.textContent('#status'));
 
-  // Rename and delete.
+  // Edit: rename and add a program guide; then delete.
   await page.click('#playlists .list-item:has-text("Small List")');
   await waitFor(() => document.querySelector('#channels-count')?.textContent === '3 channels');
-  await page.click('#playlists .list-item.selected button[title="Rename"]');
-  await page.fill('dialog[open] input', 'Renamed List');
+  await waitFor(() => document.querySelector('#channel-details')?.textContent?.includes('No program guide'));
+  check('details explain a missing guide', true);
+  await page.click('#playlists .list-item.selected button[title="Edit"]');
+  await page.fill('dialog[open] input[type=text]', 'Renamed List');
+  await page.fill('dialog[open] input[type=url]', 'file:///etc/passwd');
+  await page.click('dialog[open] button:has-text("Save")');
+  check('invalid guide URL keeps the dialog open', (await page.$('dialog[open]')) !== null);
+  await page.fill('dialog[open] input[type=url]', 'https://epg.example/guide.xml.gz?user=u&pass=p');
+  await shot('08-edit-playlist');
   await page.click('dialog[open] button:has-text("Save")');
   await page.waitForSelector('#playlists .item-name:has-text("Renamed List")');
   check('rename', true);
+  await waitFor(() => document.querySelector('#status')?.textContent?.startsWith('Updated the program guide'));
+  const guideCalls = await page.evaluate(() => window.__calls.filter(([m]) => m === 'SetPlaylistGuide' || m === 'RefreshGuide'));
+  check('guide URL saved and loaded', JSON.stringify(guideCalls.slice(-2)) === JSON.stringify([['SetPlaylistGuide', 2, 'https://epg.example/guide.xml.gz?user=u&pass=p'], ['RefreshGuide', 2]]), JSON.stringify(guideCalls));
+  await waitFor(() => document.querySelector('.channel-row .channel-now'));
+  await waitFor(() => document.querySelector('#channel-details .programme-title'));
+  check('guide shown after loading it', true);
+  check('the guide URL is never shown', !(await page.content()).includes('pass=p'));
   await page.click('#playlists .list-item.selected button[title="Delete"]');
   await page.click('dialog[open] button:has-text("Delete")');
   await waitFor(() => document.querySelectorAll('#playlists li').length === 2);

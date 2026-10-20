@@ -14,6 +14,7 @@ import (
 
 	"iptv-client/internal/channel"
 	"iptv-client/internal/database"
+	"iptv-client/internal/epg"
 	"iptv-client/internal/services"
 )
 
@@ -30,6 +31,9 @@ commands:
   fav <channel-id> on|off        set favorite
   favs <playlist-id>             list favorites
   play <channel-id>              open in the configured player
+  guide <playlist-id> [url|-]    import the program guide (after setting
+                                 its URL; "-" = the playlist's own)
+  now <channel-id>               show what is on now and next
   player                         show the player path that would be used
 `
 
@@ -173,6 +177,48 @@ func run(ctx context.Context, svc *services.Services, args []string) error {
 			return err
 		}
 		fmt.Println("opened in", name)
+
+	case "guide":
+		if err := need(1); err != nil {
+			return err
+		}
+		if len(args) > 1 {
+			url := args[1]
+			if url == "-" {
+				url = ""
+			}
+			if err := svc.Playlists.SetGuideURL(ctx, id(0), url); err != nil {
+				return err
+			}
+		}
+		res, err := svc.Playlists.RefreshGuide(ctx, id(0), func(n int) { fmt.Fprintf(os.Stderr, "\r%d programmes…", n) })
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%d programmes for %d guide channels\n", res.Programmes, res.Channels)
+
+	case "now":
+		if err := need(1); err != nil {
+			return err
+		}
+		c, err := svc.Channels.Get(ctx, id(0))
+		if err != nil {
+			return err
+		}
+		info, ok, err := svc.Guide.Upcoming(ctx, epg.Ref{
+			ChannelID: c.ID, PlaylistID: c.PlaylistID, TvgID: c.TvgID, TvgName: c.TvgName, Name: c.Name,
+		}, 5)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("the program guide has no channel matching this one")
+		}
+		fmt.Println("icon:", info.Icon != "", "tvg-logo:", c.TvgLogo != "")
+		for _, p := range info.Programmes {
+			fmt.Fprintf(w, "%s\t%s\t%s\n", p.Start.Local().Format("Mon 15:04"), p.Stop.Local().Format("15:04"), p.Title)
+		}
 
 	case "player":
 		p, err := svc.Settings.PlayerPath(ctx)

@@ -3,16 +3,19 @@
 // see Repository.ReplaceAllInPlaylist.
 package channel
 
-// Channel is one playable entry. Repository.ListByIDs fills only the list
-// fields (ID, Name, Group, Favorite); Repository.Get fills all of them.
+// Channel is one playable entry. Repository.ListByIDs leaves out URL and
+// Options; Repository.Get fills all fields.
 type Channel struct {
-	ID       int64
-	Name     string
-	URL      string
-	Group    string
-	TvgID    string
-	Options  map[string]string
-	Favorite bool
+	ID         int64
+	PlaylistID int64
+	Name       string
+	URL        string
+	Group      string
+	TvgID      string
+	TvgName    string
+	TvgLogo    string
+	Options    map[string]string
+	Favorite   bool
 }
 
 // Input is a channel to insert during a playlist refresh.

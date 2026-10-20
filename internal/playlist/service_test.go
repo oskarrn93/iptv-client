@@ -10,12 +10,14 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"iptv-client/internal/channel"
 	"iptv-client/internal/database"
+	"iptv-client/internal/epg"
 	"iptv-client/internal/setting"
 )
 
@@ -35,6 +37,7 @@ https://example.com/2.m3u8
 // services is the Service under test plus the ones used to inspect its
 // results.
 type services struct {
+	db        *database.DB
 	Playlists *Service
 	Channels  *channel.Service
 	Settings  *setting.Service
@@ -49,6 +52,7 @@ func newServices(t *testing.T) *services {
 	t.Cleanup(func() { db.Close() })
 	settings := setting.NewService(db)
 	return &services{
+		db:        db,
 		Playlists: NewService(db, settings),
 		Channels:  channel.NewService(db, settings),
 		Settings:  settings,
@@ -254,14 +258,14 @@ func TestFileSourceAndUserAgent(t *testing.T) {
 }
 
 // feed returns a produce function for replaceChannels.
-func feed(cs ...channel.Input) func(func(channel.Input) error) error {
-	return func(insert func(channel.Input) error) error {
+func feed(cs ...channel.Input) func(func(channel.Input) error) (string, error) {
+	return func(insert func(channel.Input) error) (string, error) {
 		for _, c := range cs {
 			if err := insert(c); err != nil {
-				return err
+				return "", err
 			}
 		}
-		return nil
+		return "", nil
 	}
 }
 
@@ -307,9 +311,9 @@ func TestReplaceChannelsRollsBackOnError(t *testing.T) {
 		t.Fatal(err)
 	}
 	boom := errors.New("parse failed")
-	err := svc.Playlists.replaceChannels(ctx, pid, "new", "", func(insert func(channel.Input) error) error {
+	err := svc.Playlists.replaceChannels(ctx, pid, "new", "", func(insert func(channel.Input) error) (string, error) {
 		insert(channel.Input{Name: "Half", URL: "http://x/h"})
-		return boom
+		return "", boom
 	})
 	if !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want boom", err)
@@ -408,5 +412,96 @@ func TestDeletePlaylistRemovesChannelsAndFavorites(t *testing.T) {
 	}
 	if err := svc.Playlists.Delete(ctx, 999999); !errors.Is(err, database.ErrNotFound) {
 		t.Errorf("Delete(missing) err = %v", err)
+	}
+}
+
+func TestProgramGuide(t *testing.T) {
+	ctx := context.Background()
+	svc := newServices(t)
+	now := time.Date(2026, 10, 20, 12, 30, 0, 0, time.UTC)
+	svc.Playlists.Now = func() time.Time { return now }
+	guide := atomic.Value{}
+	guide.Store(`<tv><channel id="a"><display-name>Good One</display-name></channel>
+<programme start="20261020120000 +0000" stop="20261020130000 +0000" channel="a"><title>On Now</title></programme></tv>`)
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	mux.HandleFunc("/epg.xml", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, guide.Load().(string)) })
+	mux.HandleFunc("/other.xml", func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
+	mux.HandleFunc("/list.m3u", func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `#EXTM3U x-tvg-url="ftp://nope/,`+srv.URL+`/epg.xml"`+"\n"+playlistBody[len("#EXTM3U\n"):])
+	})
+
+	p, _, err := svc.Playlists.Add(ctx, "P", srv.URL+"/list.m3u", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.TvgURL != srv.URL+"/epg.xml" || p.GuideSource() != p.TvgURL || !p.GuideRefreshedAt.IsZero() {
+		t.Fatalf("playlist = %+v", p)
+	}
+	res, err := svc.Playlists.RefreshGuide(ctx, p.ID, nil)
+	if err != nil || res.Programmes != 1 {
+		t.Fatalf("res = %+v, err = %v", res, err)
+	}
+	onNow := func() string {
+		t.Helper()
+		cs := allChannels(t, svc, p.ID)
+		info, err := epg.NewRepository(svc.db).Current(ctx, []epg.Ref{{ChannelID: cs[0].ID, PlaylistID: p.ID, TvgID: cs[0].TvgID, Name: cs[0].Name}}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ps := info[cs[0].ID].Programmes; len(ps) == 1 {
+			return ps[0].Title
+		}
+		return ""
+	}
+	if got := onNow(); got != "On Now" {
+		t.Errorf("on now = %q", got)
+	}
+	if p, _ = svc.Playlists.Get(ctx, p.ID); !p.GuideRefreshedAt.Equal(now) {
+		t.Errorf("guide refreshed at %v", p.GuideRefreshedAt)
+	}
+
+	// A failed import keeps the previous guide.
+	guide.Store(`<html>maintenance</html>`)
+	if _, err := svc.Playlists.RefreshGuide(ctx, p.ID, nil); !errors.Is(err, epg.ErrNotXMLTV) {
+		t.Errorf("err = %v, want ErrNotXMLTV", err)
+	}
+	if err := svc.Playlists.SetGuideURL(ctx, p.ID, srv.URL+"/other.xml"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Playlists.RefreshGuide(ctx, p.ID, nil); err == nil || strings.Contains(err.Error(), "other.xml") {
+		t.Errorf("err = %v, want an error without the URL", err)
+	}
+	if got := onNow(); got != "On Now" {
+		t.Errorf("guide lost after failed refresh: %q", got)
+	}
+
+	if err := svc.Playlists.SetGuideURL(ctx, p.ID, "file:///etc/passwd"); err == nil {
+		t.Error("file URL accepted")
+	}
+	// Back to the playlist's URL: the guide is kept.
+	if err := svc.Playlists.SetGuideURL(ctx, p.ID, " "); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ = svc.Playlists.Get(ctx, p.ID); p.GuideURL != "" || p.GuideSource() != p.TvgURL || onNow() != "On Now" {
+		t.Errorf("after reset: %+v", p)
+	}
+}
+
+func TestGuideURLFromHeader(t *testing.T) {
+	cases := []struct {
+		header map[string]string
+		want   string
+	}{
+		{map[string]string{}, ""},
+		{map[string]string{"url-tvg": "http://a/e.xml"}, "http://a/e.xml"},
+		{map[string]string{"x-tvg-url": " , javascript:x,https://b/e.xml.gz , http://c/"}, "https://b/e.xml.gz"},
+		{map[string]string{"tvg-url": "file:///x"}, ""},
+	}
+	for _, c := range cases {
+		if got := guideURLFromHeader(c.header); got != c.want {
+			t.Errorf("guideURLFromHeader(%v) = %q, want %q", c.header, got, c.want)
+		}
 	}
 }

@@ -29,6 +29,12 @@ and SQLite.
 - Right-click a channel (or press Ctrl+C / ⌘C) to copy its stream URL and
   paste it into any other player. Go writes the URL to the clipboard, so it
   never reaches the UI (provider URLs often contain credentials)
+- Program guide (XMLTV/EPG, plain or `.gz`): what is on now in the channel
+  list, and now/next with a description for the selected channel. The guide
+  URL comes from the playlist's `url-tvg`/`x-tvg-url` header or is set with ✎
+  on the playlist. It is loaded with the playlist and refreshed when older
+  than 12 hours. Guide channels match on `tvg-id`, else on the name
+- Channel logos from `tvg-logo` (or the guide's channel icon)
 
 ## Security model
 
@@ -43,9 +49,17 @@ Playlists are untrusted input. Before anything reaches the player:
   `mpc-hc64.exe`, `PotPlayerMini64.exe`, ...); it can only be set through a
   native file dialog.
 
-Playlist URLs are stored unencrypted in the local database.
+Program guides are untrusted input too: they are parsed as text (no
+external entities), capped at 1 GB uncompressed, and only the programmes of
+the playlist's channels for the next 48 hours are kept. Logos are downloaded
+by Go (2 MB cap, PNG/JPEG/GIF/WebP/BMP/ICO only, no SVG), cached in a `logos`
+folder next to the database and served to the UI at `/logo/<channel id>`: the
+UI's CSP allows no remote images, and logo and guide URLs never reach it.
+Logo hosts named by the playlist see your IP address when logos load.
 
-Logs never contain stream or playlist URLs, `#EXTVLCOPT` options, the
+Playlist and guide URLs are stored unencrypted in the local database.
+
+Logs never contain stream, playlist, guide or logo URLs, `#EXTVLCOPT` options, the
 User-Agent, or channel and playlist names: code logs IDs, and as a backstop
 every logged value is redacted (URLs are cut to `scheme://host/…`, the home
 folder becomes `~`). Provider host names are kept. Logs stay on this computer
@@ -59,6 +73,8 @@ frontend/              UI (Vite + TypeScript, no framework)
 frontend/e2e           UI tests and README screenshots against a stubbed backend
 internal/playlist      playlists: add, import/refresh, rename, delete (service + repository)
 internal/channel       channels: browse, search, favorites, play (service + repositories)
+internal/epg           XMLTV program guide: streaming parser, import, now/next lookup
+internal/logo          channel logo download and disk cache
 internal/setting       settings: player location, User-Agent, log level (service + repository)
 internal/logging       slog setup, rotated log files, crash capture, Wails/UI log adapters
 internal/redact        removes URLs' credentials and the home folder from logged text

@@ -1,4 +1,4 @@
-import { append, groupLabel, h, setSelected } from './dom';
+import { append, channelLogo, groupLabel, h, setSelected } from './dom';
 import { Channels } from '../wailsjs/go/main/App';
 import type { main } from '../wailsjs/go/models';
 
@@ -14,6 +14,8 @@ export interface ChannelListEvents {
   onCopyURL: (channel: Channel) => void;
   /** Right-click or the Menu key on a row; (x, y) is where to show a menu. */
   onContextMenu: (channel: Channel, x: number, y: number) => void;
+  /** The selected channel changed, or its data arrived; undefined if none. */
+  onSelect: (channel: Channel | undefined) => void;
   onError: (error: unknown) => void;
 }
 
@@ -31,6 +33,7 @@ export class ChannelList {
   #showGroup = true;
   #frame = 0;
   #drawn = ''; // "first:last" currently rendered; '' forces a render
+  #notified: number | undefined; // channel ID last passed to onSelect
   readonly #rows = new Map<number, HTMLElement>(); // drawn rows by index
   readonly #spacer = h('div', { class: 'channel-spacer' });
 
@@ -87,6 +90,32 @@ export class ChannelList {
     this.#spacer.replaceChildren();
     this.#drawn = '';
     this.#render();
+    this.#notify();
+  }
+
+  /**
+   * Reloads the drawn rows (e.g. when a program guide was updated) while
+   * showing the current data until the new data arrives. Rows out of view
+   * reload when they are scrolled to.
+   */
+  reload(): void {
+    const drawn = new Set([...this.#rows.keys()].map((i) => this.#ids[i]));
+    for (const id of this.#cache.keys()) if (!drawn.has(id)) this.#cache.delete(id);
+    this.#loading.clear();
+    this.#generation++;
+    for (const chunk of new Set([...this.#rows.keys()].map((i) => Math.floor(i / CHUNK)))) void this.#load(chunk);
+  }
+
+  /** Reloads the drawn rows if a programme shown in them has ended. */
+  reloadIfEnded(): void {
+    const now = Date.now() / 1000;
+    for (const i of this.#rows.keys()) {
+      const end = this.#cache.get(this.#ids[i])?.now?.stop;
+      if (end !== undefined && end <= now) {
+        this.reload();
+        return;
+      }
+    }
   }
 
   /** Updates one cached channel (e.g. after toggling favorite) and redraws its row. */
@@ -189,7 +218,9 @@ export class ChannelList {
         },
         channel.favorite ? '★' : '☆',
       ),
+      channelLogo(channel, 'channel-logo'),
       h('span', { class: 'channel-name', title: channel.name }, channel.name),
+      channel.now && h('span', { class: 'channel-now', title: channel.now.title }, channel.now.title),
       this.#showGroup && h('span', { class: 'channel-group' }, groupLabel(channel.group)),
       h(
         'button',
@@ -214,6 +245,7 @@ export class ChannelList {
       if (generation !== this.#generation) return;
       for (const channel of channels) this.#cache.set(channel.id, channel);
       this.#rebuild((i) => Math.floor(i / CHUNK) === chunk);
+      this.#notify();
     } catch (error) {
       if (generation === this.#generation) this.events.onError(error);
     } finally {
@@ -246,6 +278,15 @@ export class ChannelList {
       setSelected(row, Number(row.dataset.index) === this.#selected);
     }
     this.#schedule(); // only rebuilds if scrolling changed the visible range
+    this.#notify();
+  }
+
+  /** Calls onSelect if the selected channel is not the one last reported. */
+  #notify(): void {
+    const channel = this.#current();
+    if (channel?.id === this.#notified) return;
+    this.#notified = channel?.id;
+    this.events.onSelect(channel);
   }
 
   #onKey(e: KeyboardEvent): void {

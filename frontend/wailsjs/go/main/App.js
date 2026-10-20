@@ -14,6 +14,10 @@ export function CancelImport() {
   return window['go']['main']['App']['CancelImport']();
 }
 
+export function ChannelGuide(arg1) {
+  return window['go']['main']['App']['ChannelGuide'](arg1);
+}
+
 export function ChannelIDs(arg1) {
   return window['go']['main']['App']['ChannelIDs'](arg1);
 }
@@ -66,6 +70,10 @@ export function Play(arg1) {
   return window['go']['main']['App']['Play'](arg1);
 }
 
+export function RefreshGuide(arg1) {
+  return window['go']['main']['App']['RefreshGuide'](arg1);
+}
+
 export function RefreshPlaylist(arg1, arg2) {
   return window['go']['main']['App']['RefreshPlaylist'](arg1, arg2);
 }
@@ -84,6 +92,10 @@ export function SetFavorite(arg1, arg2) {
 
 export function SetLogLevel(arg1) {
   return window['go']['main']['App']['SetLogLevel'](arg1);
+}
+
+export function SetPlaylistGuide(arg1, arg2) {
+  return window['go']['main']['App']['SetPlaylistGuide'](arg1, arg2);
 }
 
 export function SetUserAgent(arg1) {
