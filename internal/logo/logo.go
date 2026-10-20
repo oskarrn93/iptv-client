@@ -12,7 +12,6 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,9 +48,8 @@ type Image struct {
 // Cache keeps logos in files under Dir, named by a hash of the URL. An
 // empty file records a failed download.
 type Cache struct {
-	Dir    string
-	Client *http.Client
-	Now    func() time.Time
+	Dir string
+	Now func() time.Time
 
 	slots    chan struct{}
 	mu       sync.Mutex
@@ -68,7 +66,6 @@ type download struct {
 func New(dir string) *Cache {
 	return &Cache{
 		Dir:      dir,
-		Client:   fetch.NewClient("http", "https"),
 		Now:      time.Now,
 		slots:    make(chan struct{}, maxDownloads),
 		inflight: map[string]*download{},
@@ -79,8 +76,7 @@ func New(dir string) *Cache {
 // cached or is stale. Concurrent requests for one URL share a download.
 // Errors never contain the URL.
 func (c *Cache) Get(ctx context.Context, rawURL, userAgent string) (Image, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+	if !fetch.IsHTTPURL(rawURL) {
 		return Image{}, ErrNoLogo
 	}
 	sum := sha256.Sum256([]byte(rawURL))
@@ -171,7 +167,7 @@ func (c *Cache) hasData(path string) bool {
 }
 
 func (c *Cache) fetch(ctx context.Context, rawURL, userAgent string) (Image, error) {
-	fr, err := fetch.URL(ctx, rawURL, fetch.Options{UserAgent: userAgent, MaxBytes: MaxBytes, Client: c.Client})
+	fr, err := fetch.URL(ctx, rawURL, fetch.Options{UserAgent: userAgent, MaxBytes: MaxBytes})
 	if err != nil {
 		return Image{}, ErrNoLogo
 	}

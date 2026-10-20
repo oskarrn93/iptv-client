@@ -39,10 +39,10 @@ type Result struct {
 	NotModified  bool
 }
 
-// ErrTooLarge is returned, wrapped with the limit, when the playlist is
+// ErrTooLarge is returned, wrapped with the limit, when the file is
 // larger than MaxBytes: by URL or File if the size is known up front,
 // otherwise by Body.Read once the limit is passed.
-var ErrTooLarge = errors.New("playlist is larger than the allowed maximum")
+var ErrTooLarge = errors.New("file is larger than the allowed maximum")
 
 func tooLarge(limit int64) error {
 	return fmt.Errorf("%w (limit %d MB)", ErrTooLarge, limit>>20)
@@ -76,12 +76,17 @@ func NewClient(schemes ...string) *http.Client {
 	}
 }
 
+// IsHTTPURL reports whether s is an absolute http:// or https:// URL.
+func IsHTTPURL(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
+
 // URL opens a playlist over HTTP(S). The caller must close Result.Body.
 // Errors never contain the URL's path, query or user info, which commonly
 // hold account credentials.
 func URL(ctx context.Context, rawURL string, o Options) (Result, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+	if !IsHTTPURL(rawURL) {
 		return Result{}, errors.New("playlist URL must be an http:// or https:// address")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
@@ -120,7 +125,7 @@ func URL(ctx context.Context, rawURL string, o Options) (Result, error) {
 		return Result{}, tooLarge(maxBytes(o))
 	}
 	return Result{
-		Body:         limit(resp.Body, maxBytes(o)),
+		Body:         Limit(resp.Body, maxBytes(o)),
 		ETag:         resp.Header.Get("ETag"),
 		LastModified: resp.Header.Get("Last-Modified"),
 	}, nil
@@ -136,7 +141,7 @@ func File(path string, o Options) (Result, error) {
 		f.Close()
 		return Result{}, tooLarge(maxBytes(o))
 	}
-	return Result{Body: limit(f, maxBytes(o))}, nil
+	return Result{Body: Limit(f, maxBytes(o))}, nil
 }
 
 // Redact returns scheme://host/… for display, hiding anything that may be a
@@ -191,7 +196,8 @@ type limitedBody struct {
 	max    int64
 }
 
-func limit(rc io.ReadCloser, n int64) io.ReadCloser {
+// Limit returns rc cut off at n bytes: reading more fails with ErrTooLarge.
+func Limit(rc io.ReadCloser, n int64) io.ReadCloser {
 	// Read one extra byte so "exactly n" and "more than n" can be told apart.
 	return &limitedBody{r: io.LimitReader(rc, n+1), c: rc, remain: n, max: n}
 }

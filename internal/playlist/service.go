@@ -248,7 +248,7 @@ var ErrNoGuide = errors.New("this playlist has no program guide URL")
 // RefreshGuide.
 func (s *Service) SetGuideURL(ctx context.Context, id int64, url string) error {
 	url = strings.TrimSpace(url)
-	if url != "" && !isHTTPURL(url) {
+	if url != "" && !fetch.IsHTTPURL(url) {
 		return errors.New("the program guide URL must be an http:// or https:// address")
 	}
 	return s.db.InTx(ctx, func(tx database.Querier) error {
@@ -316,17 +316,12 @@ func (s *Service) RefreshGuide(ctx context.Context, id int64, progress func(int)
 func guideURLFromHeader(header map[string]string) string {
 	for _, key := range []string{"url-tvg", "x-tvg-url", "tvg-url"} {
 		for _, u := range strings.Split(header[key], ",") {
-			if u = strings.TrimSpace(u); isHTTPURL(u) {
+			if u = strings.TrimSpace(u); fetch.IsHTTPURL(u) {
 				return u
 			}
 		}
 	}
 	return ""
-}
-
-func isHTTPURL(s string) bool {
-	u, err := url.Parse(s)
-	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 // Rename changes a playlist's display name.

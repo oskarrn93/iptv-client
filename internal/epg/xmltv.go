@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"golang.org/x/text/encoding/ianaindex"
+
+	"iptv-client/internal/fetch"
 )
 
 // MaxUncompressed caps how much XML is read from a gzip-compressed guide, so
@@ -63,7 +65,7 @@ func Parse(r io.Reader, h Handler) error {
 			return fmt.Errorf("program guide: %w", err)
 		}
 		defer zr.Close()
-		r = &capReader{r: zr, remain: MaxUncompressed}
+		r = fetch.Limit(zr, MaxUncompressed)
 	} else {
 		r = br
 	}
@@ -233,21 +235,4 @@ func parseTime(s string) (time.Time, bool) {
 // guide channels: case and repeated spaces are ignored.
 func Key(s string) string {
 	return strings.ToLower(strings.Join(strings.Fields(s), " "))
-}
-
-type capReader struct {
-	r      io.Reader
-	remain int64
-}
-
-func (c *capReader) Read(p []byte) (int, error) {
-	if c.remain <= 0 {
-		return 0, fmt.Errorf("program guide is larger than %d MB uncompressed", MaxUncompressed>>20)
-	}
-	if int64(len(p)) > c.remain {
-		p = p[:c.remain]
-	}
-	n, err := c.r.Read(p)
-	c.remain -= int64(n)
-	return n, err
 }
