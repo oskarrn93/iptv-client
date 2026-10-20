@@ -18,7 +18,7 @@ func TestCommandWindows(t *testing.T) {
 		{"vlc.exe", []string{"vlc.exe", "--one-instance", testStream, ":meta-title=BBC One"}},
 		{"mpv.exe", []string{"mpv.exe", "--force-media-title=BBC One", "--", testStream}},
 	} {
-		cmd, err := command("windows", tt.exe, "BBC One", testStream, nil)
+		cmd, err := command("windows", tt.exe, "BBC One", testStream, nil, Prefs{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -34,7 +34,7 @@ func TestCommandMacVLCBundle(t *testing.T) {
 	cmd, err := command("darwin", exe, "BBC One", testStream, map[string]string{
 		"http-user-agent": "UA x",
 		"http-referrer":   "http://r/",
-	})
+	}, Prefs{AudioLanguages: "sv"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,6 +56,7 @@ func TestCommandMacVLCBundle(t *testing.T) {
 	}
 	want := "#EXTM3U\n" +
 		"#EXTINF:-1,BBC One\n" +
+		"#EXTVLCOPT:audio-language=sv\n" +
 		"#EXTVLCOPT:http-referrer=http://r/\n" +
 		"#EXTVLCOPT:http-user-agent=UA x\n" +
 		testStream + "\n"
@@ -71,9 +72,8 @@ func TestCommandDirect(t *testing.T) {
 	}{
 		{"darwin", "/opt/homebrew/bin/vlc", vlc{}}, // not inside an app bundle
 		{"darwin", "/Applications/IINA.app/Contents/MacOS/iina-cli", iina{}},
-		{"linux", "/usr/bin/vlc", vlc{}},
 	} {
-		cmd, err := command(tt.goos, tt.exe, "", testStream, nil)
+		cmd, err := command(tt.goos, tt.exe, "", testStream, nil, Prefs{})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -224,11 +224,27 @@ try {
   await page.waitForSelector('dialog[open] .player-status.ok');
   check('settings shows player', (await page.textContent('dialog[open] .player-status')).includes('Detected VLC: '));
   check('settings shows version', (await page.textContent('dialog[open]')).includes('IPTV Client v0.0.0-test'));
-  await page.fill('dialog[open] input', 'MyPlayer/1.0');
+  check('audio languages default to English', (await page.inputValue('#audio-languages')) === 'en');
+  await page.fill('#audio-languages', 'SV, en');
+  await page.fill('#user-agent', 'MyPlayer/1.0');
   await shot('05-settings');
   await page.click('dialog[open] button:has-text("Save")');
   await page.waitForSelector('dialog[open]', { state: 'detached' });
   check('settings save', (await page.evaluate(() => window.__userAgent)) === 'MyPlayer/1.0');
+  check('audio languages save', (await page.evaluate(() => window.__audioLanguages)) === 'sv,en');
+
+  // An invalid language keeps the dialog open with an error.
+  await page.click('#settings-button');
+  await page.waitForSelector('dialog[open] #audio-languages');
+  check('audio languages reload', (await page.inputValue('#audio-languages')) === 'sv,en');
+  await page.fill('#audio-languages', 'english');
+  await page.click('dialog[open] button:has-text("Save")');
+  await page.waitForSelector('.toast.error');
+  check('invalid audio language shown', (await page.textContent('.toast.error')).includes('language code'));
+  check('invalid audio language rejected', (await page.evaluate(() => window.__audioLanguages)) === 'sv,en');
+  await page.click('dialog[open] button:has-text("Cancel")');
+  await page.waitForSelector('dialog[open]', { state: 'detached' });
+  await page.click('.toast.error'); // dismiss, so later checks see their own toast
 
   // Logging: the level is saved, the folder opens from Go, and uncaught
   // frontend errors reach the log.

@@ -197,6 +197,7 @@
         playerName: 'VLC',
         playerOverride: false,
         playerError: '',
+        audioLanguages: window.__audioLanguages ?? 'en',
         userAgent: window.__userAgent ?? '',
         defaultAgent: 'VLC/3.0.21 LibVLC/3.0.21',
         logLevel: window.__logLevel ?? 'info',
@@ -220,6 +221,12 @@
     // Mirrors App.Log: never fails; lines are kept for the tests.
     async Log(level, msg, attrs) {
       window.__logs.push({ level, msg, attrs });
+    },
+    // Mirrors player.NormalizeLanguages; "" resets to English.
+    async SetAudioLanguages(langs) {
+      const codes = [...new Set(langs.split(/[ ,]+/).filter(Boolean).map((c) => c.toLowerCase()))];
+      if (codes.length > 10 || codes.some((c) => !/^[a-z]{2,3}$/.test(c))) throw 'invalid language code';
+      window.__audioLanguages = codes.join(',') || 'en';
     },
     async SetUserAgent(ua) {
       if (/[\r\n]/.test(ua)) throw 'invalid User-Agent';

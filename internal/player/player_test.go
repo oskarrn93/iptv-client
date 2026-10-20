@@ -48,6 +48,7 @@ func TestSanitizeOptions(t *testing.T) {
 		"http-user-agent": "Mozilla/5.0 (X11)",
 		"HTTP-Referrer":   "http://site.example.com/",
 		"network-caching": "1500",
+		"audio-language":  "sv,en", // only from Prefs
 		"sout":            `#file{dst=C:\evil.bat}`,
 		"lua-intf":        "x",
 		"extraintf":       "http",
@@ -79,9 +80,30 @@ func TestSanitizeOptions(t *testing.T) {
 	}
 }
 
+func TestNormalizeLanguages(t *testing.T) {
+	for in, want := range map[string]string{
+		"":               "",
+		" , ":            "",
+		"sv":             "sv",
+		"SV, en  deu":    "sv,en,deu",
+		"en,sv,en":       "en,sv",
+		"fi,sv,en,de,fr": "fi,sv,en,de,fr",
+	} {
+		if got, err := NormalizeLanguages(in); err != nil || got != want {
+			t.Errorf("NormalizeLanguages(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"e", "engl", "sv;en", "en-US", "--sout", "sv,\n", "aa,bb,cc,dd,ee,ff,gg,hh,ii,jj,kk"} {
+		if got, err := NormalizeLanguages(in); err == nil {
+			t.Errorf("NormalizeLanguages(%q) = %q, want error", in, got)
+		}
+	}
+}
+
 func TestCommand(t *testing.T) {
-	const stream = "http://example.com/1.ts"
+	const stream = testStream
 	opts := map[string]string{
+		"audio-language":  "de", // playlists cannot set it
 		"http-user-agent": "UA",
 		"http-referrer":   "http://r/",
 		"network-caching": "1000",
@@ -90,6 +112,7 @@ func TestCommand(t *testing.T) {
 	vlcArgs := []string{
 		stream,
 		":meta-title=BBC One HD",
+		":audio-language=sv,en",
 		":http-referrer=http://r/",
 		":http-user-agent=UA",
 		":network-caching=1000",
@@ -99,9 +122,9 @@ func TestCommand(t *testing.T) {
 		want []string
 	}{
 		{filepath.Join("Program Files", "VideoLAN", "VLC", "vlc.exe"), vlcArgs},
-		{"/Applications/VLC.app/Contents/MacOS/VLC", vlcArgs},
 		{"/usr/bin/mpv", []string{
 			"--force-media-title=BBC One HD",
+			"--alang=sv,en",
 			"--referrer=http://r/",
 			"--user-agent=UA",
 			"--",
@@ -109,6 +132,7 @@ func TestCommand(t *testing.T) {
 		}},
 		{"/Applications/IINA.app/Contents/MacOS/iina-cli", []string{
 			"--mpv-force-media-title=BBC One HD",
+			"--mpv-alang=sv,en",
 			"--mpv-referrer=http://r/",
 			"--mpv-user-agent=UA",
 			stream,
@@ -117,7 +141,7 @@ func TestCommand(t *testing.T) {
 		{filepath.Join("Program Files", "DAUM", "PotPlayer", "PotPlayerMini64.exe"), []string{stream}},
 	}
 	for _, tt := range tests {
-		cmd, err := command("linux", tt.exe, "BBC One\x07 HD", stream, opts)
+		cmd, err := command("linux", tt.exe, "BBC One\x07 HD", stream, opts, Prefs{AudioLanguages: "SV, en"})
 		if err != nil {
 			t.Errorf("command(%q) error: %v", tt.exe, err)
 			continue
@@ -127,11 +151,14 @@ func TestCommand(t *testing.T) {
 		}
 	}
 
-	if _, err := command("linux", "vlc", "x", "--lua-intf=evil", nil); err == nil {
+	if _, err := command("linux", "vlc", "x", "--lua-intf=evil", nil, Prefs{}); err == nil {
 		t.Error("command accepted an option as the stream URL")
 	}
-	if _, err := command("linux", "cmd.exe", "x", stream, nil); err == nil {
+	if _, err := command("linux", "cmd.exe", "x", stream, nil, Prefs{}); err == nil {
 		t.Error("command accepted an unsupported executable")
+	}
+	if _, err := command("linux", "vlc", "x", stream, nil, Prefs{AudioLanguages: "sv;--sout"}); err == nil {
+		t.Error("command accepted invalid audio languages")
 	}
 }
 

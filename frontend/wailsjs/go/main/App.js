@@ -86,6 +86,10 @@ export function ResetPlayer() {
   return window['go']['main']['App']['ResetPlayer']();
 }
 
+export function SetAudioLanguages(arg1) {
+  return window['go']['main']['App']['SetAudioLanguages'](arg1);
+}
+
 export function SetFavorite(arg1, arg2) {
   return window['go']['main']['App']['SetFavorite'](arg1, arg2);
 }

@@ -83,6 +83,10 @@ func (s *Service) Play(ctx context.Context, channelID int64) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	langs, err := s.settings.AudioLanguages(ctx)
+	if err != nil {
+		return "", err
+	}
 	// Launch re-validates the URL and options; stored data is not trusted.
-	return p.Name(), player.Launch(exe, ch.Name, ch.URL, ch.Options)
+	return p.Name(), player.Launch(exe, ch.Name, ch.URL, ch.Options, player.Prefs{AudioLanguages: langs})
 }

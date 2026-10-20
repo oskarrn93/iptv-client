@@ -213,6 +213,7 @@ type Settings struct {
 	PlayerName     string `json:"playerName"`     // e.g. "VLC"
 	PlayerOverride bool   `json:"playerOverride"` // true if chosen by the user
 	PlayerError    string `json:"playerError"`    // why no player was found
+	AudioLanguages string `json:"audioLanguages"` // preference order, e.g. "sv,en"
 	UserAgent      string `json:"userAgent"`      // "" = default
 	DefaultAgent   string `json:"defaultAgent"`   // shown as placeholder
 	LogLevel       string `json:"logLevel"`       // debug, info, warn or error
@@ -575,7 +576,8 @@ func (a *App) settings(ctx context.Context, svc *services.Services) (Settings, e
 	}
 	s := Settings{
 		PlayerPath: ls.PlayerPath, PlayerName: ls.PlayerName, PlayerOverride: ls.PlayerOverride,
-		UserAgent: ls.UserAgent, DefaultAgent: fetch.DefaultUserAgent,
+		AudioLanguages: ls.AudioLanguages,
+		UserAgent:      ls.UserAgent, DefaultAgent: fetch.DefaultUserAgent,
 		LogLevel: logging.LevelName(a.logLevel.Level()), Version: version,
 	}
 	if ls.PlayerError != nil {
@@ -631,6 +633,22 @@ func (a *App) ResetPlayer() (_ Settings, err error) {
 	}
 	a.log.InfoContext(ctx, "player reset to auto-detect")
 	return a.settings(ctx, svc)
+}
+
+// SetAudioLanguages sets the preferred audio languages: language codes
+// separated by commas or spaces, most preferred first ("" = English).
+func (a *App) SetAudioLanguages(langs string) (err error) {
+	ctx, end := a.call("set_audio_languages")
+	defer end(&err)
+	svc, err := a.ready()
+	if err != nil {
+		return err
+	}
+	if err := svc.Settings.SetAudioLanguages(ctx, langs); err != nil {
+		return err
+	}
+	a.log.DebugContext(ctx, "audio languages saved")
+	return nil
 }
 
 // SetUserAgent sets the User-Agent for playlist downloads ("" = default).

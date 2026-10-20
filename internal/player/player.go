@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -39,6 +40,8 @@ var allowedOptions = map[string]func(string) bool{
 }
 
 const maxOptionLen = 512
+
+const maxLanguages = 10
 
 // ErrNotFound is returned when no player is chosen and VLC cannot be located.
 var ErrNotFound = errors.New("VLC was not found; install it from https://www.videolan.org or choose a player in Settings")
@@ -85,10 +88,49 @@ func SanitizeOptions(opts map[string]string) map[string]string {
 	return out
 }
 
+// NormalizeLanguages parses language codes separated by commas or spaces
+// ("sv, en") into the form VLC's audio-language and mpv's alang take:
+// lowercased, comma-separated, without duplicates ("sv,en"). The order is the
+// preference order and is kept. "" is valid and means no preference.
+func NormalizeLanguages(s string) (string, error) {
+	var out []string
+	for _, code := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' }) {
+		code = strings.ToLower(code)
+		if !isLanguageCode(code) {
+			return "", fmt.Errorf("%q is not a language code; use 2 or 3 letters, e.g. en or deu", code)
+		}
+		if !slices.Contains(out, code) {
+			out = append(out, code)
+		}
+	}
+	if len(out) > maxLanguages {
+		return "", fmt.Errorf("at most %d languages", maxLanguages)
+	}
+	return strings.Join(out, ","), nil
+}
+
+// isLanguageCode reports whether s looks like an ISO 639-1 or 639-2 code.
+func isLanguageCode(s string) bool {
+	if len(s) < 2 || len(s) > 3 {
+		return false
+	}
+	for _, r := range s {
+		if r < 'a' || r > 'z' {
+			return false
+		}
+	}
+	return true
+}
+
+// Prefs are the user's settings that apply to every stream.
+type Prefs struct {
+	AudioLanguages string // as NormalizeLanguages returns, e.g. "sv,en"
+}
+
 // Launch starts the player at exe detached from this process and returns
 // once it has started. The child is reaped in the background.
-func Launch(exe, title, streamURL string, opts map[string]string) error {
-	cmd, err := command(runtime.GOOS, exe, title, streamURL, opts)
+func Launch(exe, title, streamURL string, opts map[string]string, prefs Prefs) error {
+	cmd, err := command(runtime.GOOS, exe, title, streamURL, opts, prefs)
 	if err != nil {
 		return err
 	}

@@ -44,6 +44,8 @@ export function RenamePlaylist(arg1:number,arg2:string):Promise<void>;
 
 export function ResetPlayer():Promise<main.Settings>;
 
+export function SetAudioLanguages(arg1:string):Promise<void>;
+
 export function SetFavorite(arg1:number,arg2:boolean):Promise<void>;
 
 export function SetLogLevel(arg1:string):Promise<void>;
