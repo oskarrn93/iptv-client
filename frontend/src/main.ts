@@ -31,6 +31,7 @@ import { ChannelList } from './channel-list';
 import { confirmDialog, showDialog } from './dialogs';
 import {
   $,
+  append,
   type Child,
   channelLogo,
   debounce,
@@ -212,10 +213,12 @@ const renderDetails = (channel: main.Channel, programmes: main.Programme[] | nul
         ),
     ];
   }
-  ui.details.replaceChildren(
+  ui.details.replaceChildren();
+  append(
+    ui.details,
     channelLogo(channel, 'details-logo'),
     h('div', { class: 'details-title', title: channel.name }, channel.name),
-    ...info.filter((x): x is Node => x instanceof Node),
+    ...info,
   );
 };
 

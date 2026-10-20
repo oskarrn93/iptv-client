@@ -3,6 +3,8 @@
 // see Repository.ReplaceAllInPlaylist.
 package channel
 
+import "iptv-client/internal/epg"
+
 // Channel is one playable entry. Repository.ListByIDs leaves out URL and
 // Options; Repository.Get fills all fields.
 type Channel struct {
@@ -16,6 +18,11 @@ type Channel struct {
 	TvgLogo    string
 	Options    map[string]string
 	Favorite   bool
+}
+
+// GuideRef returns the fields the program guide matches the channel on.
+func (c Channel) GuideRef() epg.Ref {
+	return epg.Ref{ChannelID: c.ID, PlaylistID: c.PlaylistID, TvgID: c.TvgID, TvgName: c.TvgName, Name: c.Name}
 }
 
 // Input is a channel to insert during a playlist refresh.

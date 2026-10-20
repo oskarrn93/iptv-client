@@ -465,7 +465,7 @@ func (a *App) Channels(ids []int64) (_ []Channel, err error) {
 	}
 	refs := make([]epg.Ref, 0, len(cs))
 	for _, c := range cs {
-		refs = append(refs, guideRef(c))
+		refs = append(refs, c.GuideRef())
 	}
 	guide, gerr := svc.Guide.Current(ctx, refs)
 	if gerr != nil {
@@ -478,7 +478,6 @@ func (a *App) Channels(ids []int64) (_ []Channel, err error) {
 		ch := Channel{ID: c.ID, Name: c.Name, Group: c.Group, Favorite: c.Favorite, Logo: c.TvgLogo != "" || info.Icon != ""}
 		if len(info.Programmes) > 0 {
 			p := toProgramme(info.Programmes[0])
-			p.Description = "" // the list doesn't show it
 			ch.Now = &p
 		}
 		out = append(out, ch)
@@ -499,7 +498,7 @@ func (a *App) ChannelGuide(channelID int64) (_ []Programme, err error) {
 	if err != nil {
 		return nil, err
 	}
-	info, _, err := svc.Guide.Upcoming(ctx, guideRef(c), 4)
+	info, _, err := svc.Guide.Upcoming(ctx, c.GuideRef(), 4)
 	if err != nil {
 		return nil, err
 	}
@@ -758,10 +757,6 @@ func toPlaylist(p playlist.Playlist) Playlist {
 		ChannelCount: p.ChannelCount, LastRefreshedAt: refreshed,
 		GuideSource: p.DisplayGuideSource(), GuideCustom: p.GuideURL != "", GuideUpdatedAt: guideRefreshed,
 	}
-}
-
-func guideRef(c channel.Channel) epg.Ref {
-	return epg.Ref{ChannelID: c.ID, PlaylistID: c.PlaylistID, TvgID: c.TvgID, TvgName: c.TvgName, Name: c.Name}
 }
 
 func toProgramme(p epg.Programme) Programme {

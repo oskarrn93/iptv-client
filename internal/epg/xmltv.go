@@ -86,15 +86,12 @@ func Parse(r io.Reader, h Handler) error {
 	root := true
 	for {
 		tok, err := dec.Token()
-		if errors.Is(err, io.EOF) {
-			if root {
-				return ErrNotXMLTV
-			}
-			return nil
-		}
 		if err != nil {
 			if root {
 				return ErrNotXMLTV
+			}
+			if errors.Is(err, io.EOF) {
+				return nil
 			}
 			return fmt.Errorf("program guide: %w", err)
 		}

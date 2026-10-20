@@ -14,7 +14,6 @@ import (
 
 	"iptv-client/internal/channel"
 	"iptv-client/internal/database"
-	"iptv-client/internal/epg"
 	"iptv-client/internal/services"
 )
 
@@ -206,9 +205,7 @@ func run(ctx context.Context, svc *services.Services, args []string) error {
 		if err != nil {
 			return err
 		}
-		info, ok, err := svc.Guide.Upcoming(ctx, epg.Ref{
-			ChannelID: c.ID, PlaylistID: c.PlaylistID, TvgID: c.TvgID, TvgName: c.TvgName, Name: c.Name,
-		}, 5)
+		info, ok, err := svc.Guide.Upcoming(ctx, c.GuideRef(), 5)
 		if err != nil {
 			return err
 		}

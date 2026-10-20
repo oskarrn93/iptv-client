@@ -359,7 +359,8 @@ button.play {
   height: 24px;
   object-fit: contain;
 }
-.channel-logo.broken {
+.channel-logo.broken,
+.details-logo.broken {
   visibility: hidden;
 }
 .channel-now {
@@ -389,9 +390,6 @@ button.play {
   width: 48px;
   height: 48px;
   object-fit: contain;
-}
-.details-logo.broken {
-  visibility: hidden;
 }
 .details-title {
   font-weight: 600;
