@@ -1,9 +1,10 @@
 // Package setting stores and validates the user's settings: the media
-// player location, the User-Agent used to download playlists and the log
-// level.
+// player location, the preferred audio languages, the User-Agent used to
+// download playlists and the log level.
 package setting
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"log/slog"
@@ -19,7 +20,13 @@ const (
 	KeyPlayerPath = "vlc_path" // named before players other than VLC were supported
 	KeyUserAgent  = "user_agent"
 	KeyLogLevel   = "log_level"
+	// Normalized by player.NormalizeLanguages, e.g. "sv,en".
+	KeyAudioLanguages = "audio_languages"
 )
+
+// DefaultAudioLanguages applies until the user sets their own. Players fall
+// back to the stream's default track when none matches.
+const DefaultAudioLanguages = "en"
 
 // Service reads and validates the user's settings.
 type Service struct {
@@ -38,6 +45,7 @@ type Settings struct {
 	PlayerOverride bool   // PlayerPath was chosen by the user
 	PlayerError    error  // why no player was found
 	UserAgent      string // "" = fetch.DefaultUserAgent
+	AudioLanguages string // e.g. "sv,en"; never ""
 }
 
 // Get returns the current settings.
@@ -50,7 +58,11 @@ func (s *Service) Get(ctx context.Context) (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
-	out := Settings{PlayerOverride: override != "", UserAgent: ua}
+	langs, err := s.AudioLanguages(ctx)
+	if err != nil {
+		return Settings{}, err
+	}
+	out := Settings{PlayerOverride: override != "", UserAgent: ua, AudioLanguages: langs}
 	out.PlayerPath, out.PlayerError = player.Find(override)
 	if p, err := player.ForExecutable(out.PlayerPath); err == nil {
 		out.PlayerName = p.Name()
@@ -79,6 +91,27 @@ func (s *Service) SetPlayerPath(ctx context.Context, path string) error {
 		return err
 	}
 	return s.repo.Set(ctx, KeyPlayerPath, path)
+}
+
+// AudioLanguages returns the preferred audio languages in order, e.g.
+// "sv,en".
+func (s *Service) AudioLanguages(ctx context.Context) (string, error) {
+	langs, err := s.repo.Get(ctx, KeyAudioLanguages)
+	return cmp.Or(langs, DefaultAudioLanguages), err
+}
+
+// SetAudioLanguages stores the preferred audio languages: language codes
+// separated by commas or spaces, most preferred first ("" =
+// DefaultAudioLanguages).
+func (s *Service) SetAudioLanguages(ctx context.Context, langs string) error {
+	langs, err := player.NormalizeLanguages(langs)
+	if err != nil {
+		return err
+	}
+	if langs == "" || langs == DefaultAudioLanguages {
+		return s.repo.Delete(ctx, KeyAudioLanguages)
+	}
+	return s.repo.Set(ctx, KeyAudioLanguages, langs)
 }
 
 // UserAgent returns the User-Agent used to download playlists

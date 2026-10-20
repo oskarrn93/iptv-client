@@ -58,6 +58,32 @@ func TestSetUserAgent(t *testing.T) {
 	}
 }
 
+func TestSetAudioLanguages(t *testing.T) {
+	ctx := context.Background()
+	svc := newService(t)
+	if got, err := svc.AudioLanguages(ctx); err != nil || got != "en" {
+		t.Errorf("default AudioLanguages = %q, %v; want en", got, err)
+	}
+	if err := svc.SetAudioLanguages(ctx, "SV, en"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := svc.AudioLanguages(ctx); err != nil || got != "sv,en" {
+		t.Errorf("AudioLanguages = %q, %v", got, err)
+	}
+	if err := svc.SetAudioLanguages(ctx, "sv;--sout"); err == nil {
+		t.Error("invalid languages accepted")
+	}
+	if got, _ := svc.AudioLanguages(ctx); got != "sv,en" {
+		t.Errorf("AudioLanguages after rejected set = %q", got)
+	}
+	if err := svc.SetAudioLanguages(ctx, " "); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := svc.AudioLanguages(ctx); got != "en" {
+		t.Errorf("AudioLanguages after reset = %q, want en", got)
+	}
+}
+
 func TestSetPlayerPath(t *testing.T) {
 	ctx := context.Background()
 	svc := newService(t)

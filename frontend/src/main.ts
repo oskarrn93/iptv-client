@@ -23,6 +23,7 @@ import {
   SetFavorite,
   SetLogLevel,
   SetPlaylistGuide,
+  SetAudioLanguages,
   SetUserAgent,
 } from '../wailsjs/go/main/App';
 import { main } from '../wailsjs/go/models';
@@ -726,7 +727,17 @@ const openSettings = async (): Promise<void> => {
   reset.addEventListener('click', () => void updatePlayer(ResetPlayer));
   renderPlayer(settings);
 
+  const audioLanguages = h('input', {
+    id: 'audio-languages',
+    type: 'text',
+    value: settings.audioLanguages,
+    placeholder: 'en',
+    autocomplete: 'off',
+    spellcheck: false,
+  });
+
   const userAgent = h('input', {
+    id: 'user-agent',
     type: 'text',
     value: settings.userAgent,
     placeholder: settings.defaultAgent,
@@ -766,6 +777,13 @@ const openSettings = async (): Promise<void> => {
           'VLC is used if installed. You can also choose mpv, MPC-HC, PotPlayer or IINA; ' +
             'MPC-HC and PotPlayer ignore the playlist’s User-Agent and Referrer.',
         ),
+        h('label', null, 'Preferred audio languages', audioLanguages),
+        h(
+          'p',
+          { class: 'hint' },
+          'Language codes, most preferred first, e.g. “sv, en, deu”. The player picks the first ' +
+            'language a channel has, otherwise its default track. MPC-HC and PotPlayer ignore this.',
+        ),
       ),
       h(
         'fieldset',
@@ -800,6 +818,7 @@ const openSettings = async (): Promise<void> => {
     async (value) => {
       if (value !== 'save') return true;
       try {
+        await SetAudioLanguages(audioLanguages.value);
         await SetUserAgent(userAgent.value);
         await SetLogLevel(logLevel.value);
         return true;

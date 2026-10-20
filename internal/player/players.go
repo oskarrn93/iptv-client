@@ -56,6 +56,7 @@ func (vlc) args(title, streamURL string, opts map[string]string) []string {
 // mpvOptions maps sanitized VLC option names to mpv's. network-caching has
 // no mpv equivalent and is dropped.
 var mpvOptions = map[string]string{
+	"audio-language":  "alang",
 	"http-user-agent": "user-agent",
 	"http-referrer":   "referrer",
 }

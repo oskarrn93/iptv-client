@@ -199,6 +199,7 @@ export namespace main {
 	    playerName: string;
 	    playerOverride: boolean;
 	    playerError: string;
+	    audioLanguages: string;
 	    userAgent: string;
 	    defaultAgent: string;
 	    logLevel: string;
@@ -215,6 +216,7 @@ export namespace main {
 	        this.playerName = source["playerName"];
 	        this.playerOverride = source["playerOverride"];
 	        this.playerError = source["playerError"];
+	        this.audioLanguages = source["audioLanguages"];
 	        this.userAgent = source["userAgent"];
 	        this.defaultAgent = source["defaultAgent"];
 	        this.logLevel = source["logLevel"];

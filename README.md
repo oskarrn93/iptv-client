@@ -27,6 +27,8 @@ and SQLite.
   allowed `#EXTVLCOPT` headers (User-Agent, Referrer); MPC-HC and PotPlayer
   only get the stream URL. A running VLC is reused instead of opening a new
   window per channel
+- Preferred audio languages in Settings, in order (e.g. `sv, en`; English by
+  default): VLC, mpv and IINA pick the first language a channel has
 - Right-click a channel (or press Ctrl+C / ⌘C) to copy its stream URL and
   paste it into any other player. Go writes the URL to the clipboard, so it
   never reaches the UI (provider URLs often contain credentials)
@@ -76,7 +78,7 @@ internal/playlist      playlists: add, import/refresh, rename, delete (service +
 internal/channel       channels: browse, search, favorites, play (service + repositories)
 internal/epg           XMLTV program guide: streaming parser, import, now/next lookup
 internal/logo          channel logo download and disk cache
-internal/setting       settings: player location, User-Agent, log level (service + repository)
+internal/setting       settings: player location, audio languages, User-Agent, log level (service + repository)
 internal/logging       slog setup, rotated log files, crash capture, Wails/UI log adapters
 internal/redact        removes URLs' credentials and the home folder from logged text
 internal/desktop       opens a folder in Explorer/Finder
