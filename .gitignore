@@ -6,3 +6,5 @@ frontend/dist/*
 *.db-wal
 *.db-shm
 frontend/package.json.md5
+/iptv-client
+/iptv-client.exe
