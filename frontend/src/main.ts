@@ -646,50 +646,80 @@ const deletePlaylist = guard(async (p: main.Playlist) => {
 
 // ---------- settings ----------
 
-/** "Check for updates…": finds a newer release and offers to install it. */
-const updateButton = (current: string): HTMLButtonElement => {
+// Both the Settings button and the app menu can start a check.
+let checkingForUpdates = false;
+
+/**
+ * Finds a newer release and offers to install it, reporting progress through
+ * busy. Returns true if the app is restarting into the update.
+ */
+const checkForUpdates = async (busy: (text: string) => void): Promise<boolean> => {
+  if (checkingForUpdates) return false;
+  checkingForUpdates = true;
+  try {
+    busy('Checking for updates…');
+    const info = await CheckForUpdate();
+    if (!info.available) {
+      toast(`You have the latest version (${info.current}).`, 'info');
+      return false;
+    }
+    const ok = await confirmDialog(
+      `Update to ${info.latest}?`,
+      `IPTV Client ${info.latest} is available (you have ${info.current}). ` +
+        'It will be downloaded and installed, and the app will restart.',
+      'Install and restart',
+    );
+    if (!ok) return false;
+    busy('Downloading…');
+    const stop = EventsOn('update-progress', (pct: number) => busy(`Downloading… ${pct}%`));
+    try {
+      await InstallUpdate();
+      busy('Restarting…');
+      return true;
+    } finally {
+      stop();
+    }
+  } finally {
+    checkingForUpdates = false;
+  }
+};
+
+/** "Check for updates…" in Settings. */
+const updateButton = (): HTMLButtonElement => {
   const label = 'Check for updates…';
   const button = h('button', { type: 'button', class: 'small' }, label);
-  const busy = (text: string) => {
-    button.disabled = true;
-    button.textContent = text;
-  };
-  const done = () => {
-    button.disabled = false;
-    button.textContent = label;
-  };
-  let restarting = false;
   button.addEventListener('click', async () => {
-    busy('Checking…');
+    let restarting = false;
     try {
-      const info = await CheckForUpdate();
-      if (!info.available) {
-        toast(`You have the latest version (${current}).`, 'info');
-        return;
-      }
-      const ok = await confirmDialog(
-        `Update to ${info.latest}?`,
-        `IPTV Client ${info.latest} is available (you have ${current}).` +
-          'It will be downloaded and installed, and the app will restart.',
-        'Install and restart',
-      );
-      if (!ok) return;
-      busy('Downloading…');
-      const stop = EventsOn('update-progress', (pct: number) => busy(`Downloading… ${pct}%`));
-      try {
-        await InstallUpdate();
-        restarting = true;
-        busy('Restarting…');
-      } finally {
-        stop();
-      }
+      restarting = await checkForUpdates((text) => {
+        button.disabled = true;
+        button.textContent = text;
+      });
     } catch (error) {
       fail(error);
     } finally {
-      if (!restarting) done();
+      if (!restarting) {
+        button.disabled = false;
+        button.textContent = label;
+      }
     }
   });
   return button;
+};
+
+/** "Check for Updates…" in the macOS app menu: progress shows in the status bar. */
+const checkForUpdatesFromMenu = async (): Promise<void> => {
+  const before = ui.status.textContent ?? '';
+  let shown = '';
+  let restarting = false;
+  try {
+    restarting = await checkForUpdates((text) => setStatus((shown = text)));
+  } catch (error) {
+    fail(error);
+  } finally {
+    // Unless something else has set a newer status meanwhile.
+    if (!restarting && ui.status.textContent === shown) setStatus(before);
+  }
 };
 
 const openLogFolder = guard(() => OpenLogFolder());
@@ -790,7 +820,7 @@ const openSettings = async (): Promise<void> => {
         'div',
         { class: 'row version-row' },
         h('p', { class: 'hint' }, `IPTV Client ${settings.version} · Data folder: ${settings.dataDir}`),
-        updateButton(settings.version),
+        updateButton(),
       ),
     ],
     [
@@ -854,6 +884,13 @@ ui.search.addEventListener('keydown', (e) => {
 ui.add.addEventListener('click', () => void addPlaylist());
 ui.cancel.addEventListener('click', () => void CancelImport());
 $('#settings-button').addEventListener('click', () => void openSettings());
+
+// macOS app menu items. Unlike the toolbar button, a menu item works while
+// a dialog is open, so Settings does not open on top of one.
+EventsOn('menu-settings', () => {
+  if (!document.querySelector('dialog[open]')) void openSettings();
+});
+EventsOn('menu-check-update', () => void checkForUpdatesFromMenu());
 
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && !ui.search.disabled) {

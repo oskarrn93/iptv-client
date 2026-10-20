@@ -229,7 +229,7 @@
     async CheckForUpdate() {
       await delay();
       const latest = window.__latest ?? 'v0.0.0-test';
-      return { latest, available: latest !== 'v0.0.0-test' };
+      return { current: 'v0.0.0-test', latest, available: latest !== 'v0.0.0-test' };
     },
     async InstallUpdate() {
       for (const pct of [10, 50, 100]) {
@@ -240,6 +240,7 @@
     },
   };
 
+  window.__emit = emit;
   window.go = { main: { App: api } };
   window.runtime = {
     EventsOnMultiple(name, cb) {
