@@ -103,23 +103,28 @@ func (r *Repository) MarkRefreshed(ctx context.Context, id int64, refreshedAt ti
 }
 
 // SaveRefresh records a successful refresh that replaced the channels.
-// tvgURL is the guide URL from the playlist header; if it changed, the
-// guide is marked as never imported so that it is refreshed.
+// tvgURL is the guide URL from the playlist header.
 func (r *Repository) SaveRefresh(ctx context.Context, id int64, channelCount int, etag, lastModified, tvgURL string, refreshedAt time.Time) error {
 	return database.ExpectOne(r.q.ExecContext(ctx, `
 		UPDATE playlists
-		SET channel_count = ?, etag = ?, last_modified = ?, last_refreshed_at = ?, tvg_url = ?,
-		    guide_refreshed_at = CASE WHEN tvg_url = ? THEN guide_refreshed_at ELSE 0 END
-		WHERE id = ?`, channelCount, etag, lastModified, refreshedAt.Unix(), tvgURL, tvgURL, id))
+		SET channel_count = ?, etag = ?, last_modified = ?, last_refreshed_at = ?, tvg_url = ?
+		WHERE id = ?`, channelCount, etag, lastModified, refreshedAt.Unix(), tvgURL, id))
 }
 
-// SetGuideURL sets the user's guide URL ("" = use the playlist's) and
-// marks the guide as never imported.
+// SetGuideURL sets the user's guide URL ("" = use the playlist's).
 func (r *Repository) SetGuideURL(ctx context.Context, id int64, url string) error {
 	return database.ExpectOne(r.q.ExecContext(ctx, `
 		UPDATE playlists
-		SET guide_url = ?, guide_refreshed_at = 0
+		SET guide_url = ?
 		WHERE id = ?`, url, id))
+}
+
+// MarkGuideStale marks the guide as never imported, so that it is refreshed.
+func (r *Repository) MarkGuideStale(ctx context.Context, id int64) error {
+	return database.ExpectOne(r.q.ExecContext(ctx, `
+		UPDATE playlists
+		SET guide_refreshed_at = 0
+		WHERE id = ?`, id))
 }
 
 // MarkGuideRefreshed records a successful guide import.

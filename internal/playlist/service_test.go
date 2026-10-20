@@ -461,6 +461,13 @@ func TestProgramGuide(t *testing.T) {
 	if p, _ = svc.Playlists.Get(ctx, p.ID); !p.GuideRefreshedAt.Equal(now) {
 		t.Errorf("guide refreshed at %v", p.GuideRefreshedAt)
 	}
+	// Only a change of the source in use makes the guide due again.
+	if err := svc.Playlists.SetGuideURL(ctx, p.ID, p.TvgURL); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ = svc.Playlists.Get(ctx, p.ID); !p.GuideRefreshedAt.Equal(now) {
+		t.Errorf("same source: guide refreshed at %v", p.GuideRefreshedAt)
+	}
 
 	// A failed import keeps the previous guide.
 	guide.Store(`<html>maintenance</html>`)
@@ -469,6 +476,9 @@ func TestProgramGuide(t *testing.T) {
 	}
 	if err := svc.Playlists.SetGuideURL(ctx, p.ID, srv.URL+"/other.xml"); err != nil {
 		t.Fatal(err)
+	}
+	if p, _ = svc.Playlists.Get(ctx, p.ID); !p.GuideRefreshedAt.IsZero() {
+		t.Errorf("new source: guide refreshed at %v", p.GuideRefreshedAt)
 	}
 	if _, err := svc.Playlists.RefreshGuide(ctx, p.ID, nil); err == nil || strings.Contains(err.Error(), "other.xml") {
 		t.Errorf("err = %v, want an error without the URL", err)

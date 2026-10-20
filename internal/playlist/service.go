@@ -206,12 +206,9 @@ func (s *Service) replaceChannels(ctx context.Context, playlistID int64, etag, l
 
 	return s.db.InTx(ctx, func(tx database.Querier) error {
 		playlists := NewRepository(tx)
-		exists, err := playlists.Exists(ctx, playlistID)
+		before, err := playlists.Get(ctx, playlistID)
 		if err != nil {
 			return err
-		}
-		if !exists {
-			return fmt.Errorf("playlist %d: %w", playlistID, database.ErrNotFound)
 		}
 		var tvgURL string
 		n, err := channel.NewRepository(tx).ReplaceAllInPlaylist(ctx, playlistID, func(insert func(channel.Input) error) error {
@@ -225,17 +222,23 @@ func (s *Service) replaceChannels(ctx context.Context, playlistID int64, etag, l
 		if err := playlists.SaveRefresh(ctx, playlistID, n, etag, lastModified, tvgURL, s.Now()); err != nil {
 			return err
 		}
-		// Like SetGuideURL: once nothing names a guide, the old one would
-		// otherwise never be refreshed or cleared.
-		p, err := playlists.Get(ctx, playlistID)
-		if err != nil {
-			return err
-		}
-		if p.GuideSource() == "" {
-			return epg.NewRepository(tx).DeleteAllInPlaylist(ctx, playlistID)
-		}
-		return nil
+		after := before
+		after.TvgURL = tvgURL
+		return syncGuide(ctx, tx, before, after)
 	})
+}
+
+// syncGuide brings the stored guide in line with a change of a playlist's
+// guide source: a new source is due for download, and with none left the
+// old guide is deleted, since it would never be refreshed or cleared.
+func syncGuide(ctx context.Context, tx database.Querier, before, after Playlist) error {
+	switch src := after.GuideSource(); {
+	case src == "":
+		return epg.NewRepository(tx).DeleteAllInPlaylist(ctx, after.ID)
+	case src != before.GuideSource():
+		return NewRepository(tx).MarkGuideStale(ctx, after.ID)
+	}
+	return nil
 }
 
 // ErrNoGuide is returned when refreshing the guide of a playlist that has
@@ -253,17 +256,16 @@ func (s *Service) SetGuideURL(ctx context.Context, id int64, url string) error {
 	}
 	return s.db.InTx(ctx, func(tx database.Querier) error {
 		playlists := NewRepository(tx)
-		p, err := playlists.Get(ctx, id)
+		before, err := playlists.Get(ctx, id)
 		if err != nil {
 			return err
 		}
 		if err := playlists.SetGuideURL(ctx, id, url); err != nil {
 			return err
 		}
-		if url == "" && p.TvgURL == "" {
-			return epg.NewRepository(tx).DeleteAllInPlaylist(ctx, id)
-		}
-		return nil
+		after := before
+		after.GuideURL = url
+		return syncGuide(ctx, tx, before, after)
 	})
 }
 
