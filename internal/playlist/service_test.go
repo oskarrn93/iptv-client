@@ -182,7 +182,7 @@ func TestSetURL(t *testing.T) {
 
 	// A failing new URL keeps the old URL and channels.
 	bad := newServer(t, "<html>Account expired</html>")
-	if _, err := svc.Playlists.SetURL(ctx, p.ID, bad.URL, nil); !errors.Is(err, ErrNoChannels) {
+	if _, _, err := svc.Playlists.SetURL(ctx, p.ID, bad.URL, nil); !errors.Is(err, ErrNoChannels) {
 		t.Fatalf("err = %v, want ErrNoChannels", err)
 	}
 	if got, _ := svc.Playlists.Get(ctx, p.ID); got.Source != oldSrv.URL || got.ChannelCount != 2 {
@@ -192,11 +192,11 @@ func TestSetURL(t *testing.T) {
 	// The new server has the old ETag: it must not be sent, or the import
 	// would be skipped as not modified. No rate limit applies either.
 	newSrv := newServer(t, "#EXTM3U\n#EXTINF:-1,Only\nhttp://example.com/only\n")
-	res, err := svc.Playlists.SetURL(ctx, p.ID, " "+newSrv.URL+" ", nil)
+	got, res, err := svc.Playlists.SetURL(ctx, p.ID, " "+newSrv.URL+" ", nil)
 	if err != nil || res.NotModified || res.Imported != 1 {
 		t.Fatalf("SetURL = %+v, %v", res, err)
 	}
-	if got, _ := svc.Playlists.Get(ctx, p.ID); got.Source != newSrv.URL || got.ETag != `"1"` {
+	if got.Source != newSrv.URL || got.ETag != `"1"` {
 		t.Errorf("after change = %+v", got)
 	}
 	if cs := allChannels(t, svc, p.ID); len(cs) != 1 || cs[0].Name != "Only" {
@@ -207,7 +207,7 @@ func TestSetURL(t *testing.T) {
 		t.Errorf("refresh used the old URL (err %v)", err)
 	}
 
-	if _, err := svc.Playlists.SetURL(ctx, p.ID, "file:///etc/passwd", nil); err == nil {
+	if _, _, err := svc.Playlists.SetURL(ctx, p.ID, "file:///etc/passwd", nil); err == nil {
 		t.Error("file URL accepted")
 	}
 	file := filepath.Join(t.TempDir(), "list.m3u")
@@ -218,7 +218,7 @@ func TestSetURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Playlists.SetURL(ctx, fp.ID, newSrv.URL, nil); err == nil {
+	if _, _, err := svc.Playlists.SetURL(ctx, fp.ID, newSrv.URL, nil); err == nil {
 		t.Error("file playlist got a URL")
 	}
 }

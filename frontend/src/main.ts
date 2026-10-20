@@ -468,12 +468,7 @@ const describeImport = (r: main.ImportResult): string =>
 
 const addPlaylist = async (): Promise<void> => {
   const name = h('input', { type: 'text', placeholder: 'Optional — e.g. My provider', autocomplete: 'off' });
-  const url = h('input', {
-    type: 'url',
-    placeholder: 'https://provider.example/get.php?username=…',
-    autocomplete: 'off',
-    spellcheck: false,
-  });
+  const url = playlistURLInput();
   const guide = guideInput();
   const choice = await showDialog(
     'Add playlist',
@@ -520,6 +515,15 @@ const addPlaylist = async (): Promise<void> => {
   await loadPlaylists();
   await selectPlaylist(result.playlist.id); // also loads the guide
 };
+
+const playlistURLInput = (): HTMLInputElement =>
+  h('input', {
+    type: 'url',
+    name: 'source',
+    placeholder: 'https://provider.example/get.php?username=…',
+    autocomplete: 'off',
+    spellcheck: false,
+  });
 
 const guideInput = (): HTMLInputElement =>
   h('input', {
@@ -579,13 +583,7 @@ const reloadAfterImport = async (p: main.Playlist, result: main.ImportResult): P
 const editPlaylist = guard(async (p: main.Playlist) => {
   const name = h('input', { type: 'text', value: p.name, required: true, autocomplete: 'off', spellcheck: false });
   const isURL = p.sourceType === 'url';
-  const source = h('input', {
-    type: 'url',
-    name: 'source',
-    placeholder: 'https://provider.example/get.php?username=…',
-    autocomplete: 'off',
-    spellcheck: false,
-  });
+  const source = playlistURLInput();
   const guide = guideInput();
   let useDefault = false;
   const guideStatus = h('p', { class: 'hint' });
@@ -628,7 +626,7 @@ const editPlaylist = guard(async (p: main.Playlist) => {
       { label: 'Save', value: 'save', kind: 'primary' },
     ],
     async () => {
-      if (!checkHTTPURL(source) || !checkHTTPURL(guide)) return false;
+      if ((isURL && !checkHTTPURL(source)) || !checkHTTPURL(guide)) return false;
       try {
         const newName = name.value.trim();
         if (newName && newName !== p.name) await RenamePlaylist(p.id, newName);
@@ -645,19 +643,17 @@ const editPlaylist = guard(async (p: main.Playlist) => {
     },
   );
   if (!choice) return;
+  const url = source.value.trim();
+  const label = name.value.trim() || p.name;
+  const result = url ? await runImport(`Importing “${label}” from the new URL`, () => SetPlaylistURL(p.id, url)) : null;
+  if (result) {
+    setStatus(`Changed the URL of “${label}”: ${describeImport(result)}`);
+    await reloadAfterImport(p, result); // also loads the guide, which the new playlist may name
+    return;
+  }
   await loadPlaylists();
   const updated = state.playlists.find((x) => x.id === p.id);
-  const url = source.value.trim();
-  if (url && updated) {
-    // Also loads the guide, which the new playlist may name.
-    const result = await runImport(`Importing “${updated.name}” from the new URL`, () => SetPlaylistURL(p.id, url));
-    if (!result) {
-      if (reload) await refreshGuide(updated); // the guide change was saved
-      return;
-    }
-    setStatus(`Changed the URL of “${updated.name}”: ${describeImport(result)}`);
-    await reloadAfterImport(updated, result);
-  } else if (reload && updated) await refreshGuide(updated);
+  if (reload && updated) await refreshGuide(updated);
   else if (state.playlistId === p.id) showDetails(detailsChannel);
 });
 

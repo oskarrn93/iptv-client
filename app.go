@@ -304,13 +304,7 @@ func (a *App) RefreshPlaylist(id int64, force bool) (ImportResult, error) {
 func (a *App) SetPlaylistURL(id int64, url string) (ImportResult, error) {
 	return a.runImport("set_playlist_url", []slog.Attr{slog.Int64("playlist_id", id)},
 		func(ctx context.Context, svc *services.Services) (playlist.Playlist, playlist.RefreshResult, error) {
-			res, err := svc.Playlists.SetURL(ctx, id, url, a.progress)
-			if err != nil {
-				return playlist.Playlist{}, res, err
-			}
-			// The import has committed: a cancel arriving now must not fail it.
-			p, err := svc.Playlists.Get(context.WithoutCancel(ctx), id)
-			return p, res, err
+			return svc.Playlists.SetURL(ctx, id, url, a.progress)
 		})
 }
 

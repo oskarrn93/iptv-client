@@ -131,24 +131,30 @@ func (s *Service) Refresh(ctx context.Context, id int64, force bool, progress fu
 	return s.refresh(ctx, p, progress)
 }
 
-// SetURL changes the URL of a URL playlist and imports from it. The new URL
-// is saved only if the import succeeds; otherwise the old URL and channels
-// are kept.
-func (s *Service) SetURL(ctx context.Context, id int64, url string, progress func(int)) (RefreshResult, error) {
+// SetURL changes the URL of a URL playlist, imports from it and returns the
+// updated playlist. The new URL is saved only if the import succeeds;
+// otherwise the old URL and channels are kept.
+func (s *Service) SetURL(ctx context.Context, id int64, url string, progress func(int)) (Playlist, RefreshResult, error) {
 	url = strings.TrimSpace(url)
 	if !fetch.IsHTTPURL(url) {
-		return RefreshResult{}, errors.New("the playlist URL must be an http:// or https:// address")
+		return Playlist{}, RefreshResult{}, errors.New("the playlist URL must be an http:// or https:// address")
 	}
 	p, err := s.repo.Get(ctx, id)
 	if err != nil {
-		return RefreshResult{}, err
+		return Playlist{}, RefreshResult{}, err
 	}
 	if p.SourceType != SourceURL {
-		return RefreshResult{}, errors.New("this playlist is loaded from a file, not a URL")
+		return Playlist{}, RefreshResult{}, errors.New("this playlist is loaded from a file, not a URL")
 	}
 	// The validators belong to the old URL.
 	p.Source, p.ETag, p.LastModified = url, "", ""
-	return s.refresh(ctx, p, progress)
+	res, err := s.refresh(ctx, p, progress)
+	if err != nil {
+		return Playlist{}, res, err
+	}
+	// The import has committed: a cancel arriving now must not fail it.
+	p, err = s.repo.Get(context.WithoutCancel(ctx), id)
+	return p, res, err
 }
 
 // refresh imports p from p.Source.
