@@ -99,8 +99,10 @@ export class ChannelList {
    * reload when they are scrolled to.
    */
   reload(): void {
-    const drawn = new Set([...this.#rows.keys()].map((i) => this.#ids[i]));
-    for (const id of this.#cache.keys()) if (!drawn.has(id)) this.#cache.delete(id);
+    // Keep the selected channel even when scrolled away: #notify would
+    // otherwise report it as deselected and close the details panel.
+    const keep = new Set([...this.#rows.keys(), this.#selected].map((i) => this.#ids[i]));
+    for (const id of this.#cache.keys()) if (!keep.has(id)) this.#cache.delete(id);
     this.#loading.clear();
     this.#generation++;
     for (const chunk of new Set([...this.#rows.keys()].map((i) => Math.floor(i / CHUNK)))) void this.#load(chunk);
