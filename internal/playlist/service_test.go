@@ -487,6 +487,15 @@ func TestProgramGuide(t *testing.T) {
 	if p, _ = svc.Playlists.Get(ctx, p.ID); p.GuideURL != "" || p.GuideSource() != p.TvgURL || onNow() != "On Now" {
 		t.Errorf("after reset: %+v", p)
 	}
+
+	// A refresh whose header no longer names a guide drops the old one.
+	cs := allChannels(t, svc, p.ID)
+	if err := svc.Playlists.replaceChannels(ctx, p.ID, "", "", feed(channel.Input{Name: cs[0].Name, TvgID: cs[0].TvgID, URL: "http://example.com/1"})); err != nil {
+		t.Fatal(err)
+	}
+	if got := onNow(); got != "" {
+		t.Errorf("guide kept without a guide URL: %q", got)
+	}
 }
 
 func TestGuideURLFromHeader(t *testing.T) {

@@ -222,7 +222,19 @@ func (s *Service) replaceChannels(ctx context.Context, playlistID int64, etag, l
 		if err != nil {
 			return err
 		}
-		return playlists.SaveRefresh(ctx, playlistID, n, etag, lastModified, tvgURL, s.Now())
+		if err := playlists.SaveRefresh(ctx, playlistID, n, etag, lastModified, tvgURL, s.Now()); err != nil {
+			return err
+		}
+		// Like SetGuideURL: once nothing names a guide, the old one would
+		// otherwise never be refreshed or cleared.
+		p, err := playlists.Get(ctx, playlistID)
+		if err != nil {
+			return err
+		}
+		if p.GuideSource() == "" {
+			return epg.NewRepository(tx).DeleteAllInPlaylist(ctx, playlistID)
+		}
+		return nil
 	})
 }
 
