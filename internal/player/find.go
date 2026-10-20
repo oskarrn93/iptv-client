@@ -26,10 +26,9 @@ func (name pathLookup) candidates() []string {
 	return nil
 }
 
-// appBundles finds VLC.app in macOS Applications folders. Launching the
-// binary inside the bundle (rather than `open -a VLC`) is what lets us pass
-// arguments such as --meta-title. It starts a new VLC instance per stream;
-// `open` would reuse a running VLC but silently drop arguments.
+// appBundles finds VLC.app in macOS Applications folders. The binary inside
+// the bundle is what users pick and settings store; command maps it back to
+// the bundle to reuse a running VLC.
 type appBundles []string
 
 func (dirs appBundles) candidates() []string {

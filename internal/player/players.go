@@ -34,20 +34,23 @@ var players = map[string]Player{
 	"potplayermini64.exe": urlOnly("PotPlayer"),
 }
 
-// vlc passes the title and every sanitized option using VLC's own names.
+// vlc passes the title and every sanitized option as item options
+// (":name=value" after the URL): a running VLC that is handed the stream
+// (see command) receives those with the URL, but not global
+// "--name" options.
 type vlc struct{}
 
 func (vlc) Name() string { return "VLC" }
 
 func (vlc) args(title, streamURL string, opts map[string]string) []string {
-	var args []string
+	args := []string{streamURL}
 	if title != "" {
-		args = append(args, "--meta-title="+title)
+		args = append(args, ":meta-title="+title)
 	}
 	for _, k := range slices.Sorted(maps.Keys(opts)) {
-		args = append(args, "--"+k+"="+opts[k])
+		args = append(args, ":"+k+"="+opts[k])
 	}
-	return append(args, streamURL)
+	return args
 }
 
 // mpvOptions maps sanitized VLC option names to mpv's. network-caching has
@@ -128,6 +131,13 @@ func supportedNames() string {
 	}
 	slices.Sort(names)
 	return strings.Join(slices.Compact(names), ", ")
+}
+
+// appBundle returns the macOS app bundle that contains exe, the inverse of
+// bundleExecutable.
+func appBundle(exe string) (string, bool) {
+	bundle := filepath.Dir(filepath.Dir(filepath.Dir(exe)))
+	return bundle, strings.EqualFold(filepath.Ext(bundle), ".app")
 }
 
 // bundleExecutable returns the supported player binary inside a macOS app
