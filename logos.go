@@ -32,27 +32,21 @@ func (a *App) serveLogo(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	var urls []string
-	if c.TvgLogo != "" {
-		urls = append(urls, c.TvgLogo)
-	}
-	if guide, err := svc.Guide.Current(ctx, []epg.Ref{guideRef(c)}); err == nil && guide[id].Icon != "" {
-		urls = append(urls, guide[id].Icon)
-	}
-	for _, u := range urls {
-		img, err := a.logos.Get(ctx, u, ua)
-		if errors.Is(err, logo.ErrNoLogo) {
-			continue
+	img, err := a.logos.Get(ctx, c.TvgLogo, ua)
+	if errors.Is(err, logo.ErrNoLogo) {
+		// The guide icon is only a fallback, so look it up only when needed.
+		guide, gerr := svc.Guide.Current(ctx, []epg.Ref{c.GuideRef()})
+		if gerr == nil {
+			img, err = a.logos.Get(ctx, guide[id].Icon, ua)
 		}
-		if err != nil {
-			break // the request was cancelled
-		}
-		h := w.Header()
-		h.Set("Content-Type", img.Type)
-		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("Cache-Control", "private, max-age=86400")
-		w.Write(img.Data)
+	}
+	if err != nil {
+		http.NotFound(w, r)
 		return
 	}
-	http.NotFound(w, r)
+	h := w.Header()
+	h.Set("Content-Type", img.Type)
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Cache-Control", "private, max-age=86400")
+	w.Write(img.Data)
 }

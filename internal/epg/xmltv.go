@@ -11,6 +11,7 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/text/encoding/ianaindex"
 
@@ -45,10 +46,12 @@ type Programme struct {
 }
 
 // Handler receives the elements of a guide in document order. Returning an
-// error stops parsing.
+// error stops parsing. If Want is set, programmes of channels it rejects
+// are skipped without decoding them: big guides have millions.
 type Handler struct {
 	Channel   func(Channel) error
 	Programme func(Programme) error
+	Want      func(channel string) bool
 }
 
 // ErrNotXMLTV is returned when the input is not an XMLTV document.
@@ -118,6 +121,12 @@ func Parse(r io.Reader, h Handler) error {
 				}
 			}
 		case "programme":
+			if h.Want != nil && !h.Want(strings.TrimSpace(attr(se, "channel"))) {
+				if err := dec.Skip(); err != nil {
+					return fmt.Errorf("program guide: %w", err)
+				}
+				continue
+			}
 			var p xmlProgramme
 			if err := dec.DecodeElement(&p, &se); err != nil {
 				return fmt.Errorf("program guide: %w", err)
@@ -133,6 +142,15 @@ func Parse(r io.Reader, h Handler) error {
 			}
 		}
 	}
+}
+
+func attr(se xml.StartElement, name string) string {
+	for _, a := range se.Attr {
+		if a.Name.Local == name {
+			return a.Value
+		}
+	}
+	return ""
 }
 
 type xmlChannel struct {
@@ -192,8 +210,8 @@ func (p xmlProgramme) programme() (Programme, bool) {
 func first(values []string, limit int) string {
 	for _, v := range values {
 		if v = strings.TrimSpace(v); v != "" {
-			if r := []rune(v); len(r) > limit {
-				v = strings.TrimSpace(string(r[:limit])) + "…"
+			if utf8.RuneCountInString(v) > limit {
+				v = strings.TrimSpace(string([]rune(v)[:limit])) + "…"
 			}
 			return v
 		}

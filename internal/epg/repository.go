@@ -162,6 +162,10 @@ func (r *Repository) Import(ctx context.Context, playlistID int64, src io.Reader
 			}
 			return progs.Add(ctx, programmeRow{ID: id, Start: start, Stop: stop, Title: p.Title, Desc: p.Description})
 		},
+		Want: func(channel string) bool {
+			id := Key(channel)
+			return matched[id] || keys.IDs[id]
+		},
 	})
 	if err != nil {
 		return ImportResult{}, err

@@ -112,12 +112,15 @@ func (r *Repository) resolve(ctx context.Context, playlistID int64, refs []Ref) 
 	if err != nil {
 		return nil, nil, err
 	}
+	// Two SELECTs rather than one OR: without ANALYZE statistics SQLite
+	// won't use both indexes for the OR and scans the whole playlist.
 	rows, err := r.q.QueryContext(ctx, `
-		SELECT guide_id, name_key, icon
-		FROM guide_channels
-		WHERE playlist_id = ?
-		  AND (guide_id IN (SELECT value FROM json_each(?)) OR name_key IN (SELECT value FROM json_each(?)))
-		ORDER BY rowid`, playlistID, string(idList), string(nameList))
+		SELECT rowid, guide_id, name_key, icon FROM guide_channels
+		WHERE playlist_id = ? AND guide_id IN (SELECT value FROM json_each(?))
+		UNION
+		SELECT rowid, guide_id, name_key, icon FROM guide_channels
+		WHERE playlist_id = ? AND name_key IN (SELECT value FROM json_each(?))
+		ORDER BY 1`, playlistID, string(idList), playlistID, string(nameList))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -126,8 +129,9 @@ func (r *Repository) resolve(ctx context.Context, playlistID int64, refs []Ref) 
 	byName := map[string]string{} // name key -> first guide ID with it
 	icons := map[string]string{}
 	for rows.Next() {
+		var rowid int64
 		var id, name, icon string
-		if err := rows.Scan(&id, &name, &icon); err != nil {
+		if err := rows.Scan(&rowid, &id, &name, &icon); err != nil {
 			return nil, nil, err
 		}
 		known[id] = true
