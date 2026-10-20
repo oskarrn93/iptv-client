@@ -98,12 +98,30 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: dist
+      # Re-running for a tag whose release already exists (a re-run job, or a
+      # release drafted by hand) updates it in place instead of failing.
       - run: |
           cd dist
-          # Install instructions first, then GitHub's generated changelog.
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-            --notes-file ../.github/release-notes.md --generate-notes \
-            iptv-client-windows-amd64/iptv-client-windows-amd64-setup.exe \
+          assets=(
+            iptv-client-windows-amd64/iptv-client-windows-amd64-setup.exe
             iptv-client-macos-universal/iptv-client-macos-universal.dmg
+          )
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # `gh release edit` has no --generate-notes, so build the same body
+            # create produces: install instructions, then the generated changelog.
+            {
+              cat ../.github/release-notes.md
+              echo
+              gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+                -f tag_name="$GITHUB_REF_NAME" --jq .body
+            } > "$RUNNER_TEMP/notes.md"
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --notes-file "$RUNNER_TEMP/notes.md"
+            gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}"
+          else
+            # Install instructions first, then GitHub's generated changelog.
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --notes-file ../.github/release-notes.md --generate-notes "${assets[@]}"
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
