@@ -99,8 +99,8 @@ export class ChannelList {
    * reload when they are scrolled to.
    */
   reload(): void {
-    // Keep the selected channel even when scrolled away: #notify would
-    // otherwise report it as deselected and close the details panel.
+    // Keep the selected channel even when scrolled away, so the keyboard
+    // shortcuts still act on it.
     const keep = new Set([...this.#rows.keys(), this.#selected].map((i) => this.#ids[i]));
     for (const id of this.#cache.keys()) if (!keep.has(id)) this.#cache.delete(id);
     this.#loading.clear();
@@ -285,8 +285,11 @@ export class ChannelList {
 
   /** Calls onSelect if the selected channel is not the one last reported. */
   #notify(): void {
-    const channel = this.#current();
-    if (channel?.id === this.#notified) return;
+    const id = this.#ids[this.#selected];
+    const channel = this.#cache.get(id);
+    // Not loaded: the cache may just have been cleared while the selection
+    // stayed, so only report a change of channel.
+    if (channel ? channel.id === this.#notified : id === this.#notified || this.#notified === undefined) return;
     this.#notified = channel?.id;
     this.events.onSelect(channel);
   }
