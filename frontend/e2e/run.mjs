@@ -55,7 +55,11 @@ try {
   check('HTML in channel name shown as text', evil?.startsWith('<img src=x'), evil);
   check(
     'no script ran from playlist data',
-    await page.evaluate(() => window.__xss === undefined && !document.querySelector('#channels img:not(.channel-logo)')),
+    await page.evaluate(
+      () =>
+        window.__xss === undefined &&
+        [...document.querySelectorAll('#channels img')].every((i) => /^\/logo\/\d+$/.test(i.getAttribute('src') ?? '')),
+    ),
   );
   const bold = await page.$$eval('#groups .item-name', (els) => els.map((e) => e.textContent));
   check('HTML in group name shown as text', bold.includes('<b>Bold Group</b>'));
