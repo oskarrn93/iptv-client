@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -221,6 +222,10 @@ func (c *Cache) Prune() error {
 	entries, err := os.ReadDir(c.Dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
+	}
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		return pe.Err // callers log it; the path contains the user name
 	}
 	if err != nil {
 		return err
