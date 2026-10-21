@@ -38,7 +38,7 @@ func (r *Repository) Create(ctx context.Context, name string, t SourceType, sour
 func (r *Repository) Get(ctx context.Context, id int64) (Playlist, error) {
 	row := r.q.QueryRowContext(ctx, `
 		SELECT id, name, source_type, source, etag, last_modified, last_refreshed_at, channel_count, created_at,
-		       guide_url, tvg_url, guide_refreshed_at
+		       guide_url, tvg_url, guide_refreshed_at, disabled
 		FROM playlists
 		WHERE id = ?`, id)
 	p, err := scanPlaylist(row)
@@ -60,7 +60,7 @@ func (r *Repository) Exists(ctx context.Context, id int64) (bool, error) {
 func (r *Repository) List(ctx context.Context) ([]Playlist, error) {
 	rows, err := r.q.QueryContext(ctx, `
 		SELECT id, name, source_type, source, etag, last_modified, last_refreshed_at, channel_count, created_at,
-		       guide_url, tvg_url, guide_refreshed_at
+		       guide_url, tvg_url, guide_refreshed_at, disabled
 		FROM playlists
 		ORDER BY position, id`)
 	if err != nil {
@@ -92,6 +92,14 @@ func (r *Repository) SetPosition(ctx context.Context, id int64, position int) er
 		UPDATE playlists
 		SET position = ?
 		WHERE id = ?`, position, id))
+}
+
+// SetDisabled disables or enables a playlist.
+func (r *Repository) SetDisabled(ctx context.Context, id int64, disabled bool) error {
+	return database.ExpectOne(r.q.ExecContext(ctx, `
+		UPDATE playlists
+		SET disabled = ?
+		WHERE id = ?`, disabled, id))
 }
 
 // Delete removes a playlist row. Its channels and favorites are removed by
@@ -150,7 +158,7 @@ func scanPlaylist(row interface{ Scan(...any) error }) (Playlist, error) {
 	var p Playlist
 	var refreshed, created, guideRefreshed int64
 	err := row.Scan(&p.ID, &p.Name, &p.SourceType, &p.Source, &p.ETag, &p.LastModified, &refreshed, &p.ChannelCount, &created,
-		&p.GuideURL, &p.TvgURL, &guideRefreshed)
+		&p.GuideURL, &p.TvgURL, &guideRefreshed, &p.Disabled)
 	if err != nil {
 		return Playlist{}, err
 	}

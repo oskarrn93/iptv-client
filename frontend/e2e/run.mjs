@@ -426,6 +426,27 @@ try {
   check('Alt+Down reorders', (await reorders()).at(-1) === '1,3' && (await order()) === 'Big Test List|My Provider');
   check('focus stays on the moved playlist', await page.evaluate(() => document.activeElement?.textContent?.includes('My Provider')));
 
+  // Disable hides a playlist and selects another; it can be shown and enabled.
+  await page.click('#playlists li:has-text("Big Test List")');
+  await titleIs('All channels');
+  await page.hover('#playlists li:has-text("Big Test List")');
+  await page.click('#playlists li:has-text("Big Test List") button[title="Disable"]');
+  await waitFor(() => document.querySelector('#status')?.textContent === 'Disabled “Big Test List”');
+  check('disabled playlist hidden', (await order()) === 'My Provider', await order());
+  check('another playlist selected', (await page.textContent('#playlists .selected .item-name')) === 'My Provider');
+  check('show disabled offered', (await page.textContent('#show-disabled')) === 'Show 1 disabled');
+  await page.click('#show-disabled');
+  await page.waitForSelector('#playlists li.disabled');
+  check('disabled playlist shown dimmed', (await order()) === 'Big Test List|My Provider');
+  const disabledActions = await page.$$eval('#playlists li.disabled button', (els) => els.map((e) => e.title).join('|'));
+  check('disabled playlist can only be enabled or deleted', disabledActions === 'Enable|Delete', disabledActions);
+  await shot('09-disabled');
+  await page.click('#playlists li.disabled .item-name');
+  check('disabled playlist cannot be selected', (await page.textContent('#playlists .selected .item-name')) === 'My Provider');
+  await page.hover('#playlists li.disabled');
+  await page.click('#playlists li.disabled button[title="Enable"]');
+  await waitFor(() => !document.querySelector('#playlists li.disabled'));
+  check('enable shows it again', (await order()) === 'Big Test List|My Provider' && (await page.isHidden('#show-disabled')));
   // The stub forgets added playlists on reload; leave one selected that it keeps.
   await page.click('#playlists li:has-text("Big Test List")');
   await titleIs('All channels');

@@ -154,6 +154,7 @@ type Playlist struct {
 	GuideSource     string `json:"guideSource"`     // redacted program guide URL, "" = none
 	GuideCustom     bool   `json:"guideCustom"`     // the guide URL was set by the user
 	GuideUpdatedAt  int64  `json:"guideUpdatedAt"`  // unix seconds, 0 = never
+	Disabled        bool   `json:"disabled"`        // hidden from the list unless shown
 }
 
 // Group is a channel group with its size.
@@ -240,7 +241,8 @@ const UpdateProgressEvent = "update-progress"
 
 // --- playlists ---
 
-// ListPlaylists returns all playlists in the user's order.
+// ListPlaylists returns all playlists in the user's order, disabled ones
+// included.
 func (a *App) ListPlaylists() (_ []Playlist, err error) {
 	ctx, end := a.call("list_playlists")
 	defer end(&err)
@@ -423,6 +425,21 @@ func (a *App) ReorderPlaylists(ids []int64) (err error) {
 		return err
 	}
 	return svc.Playlists.Reorder(ctx, ids)
+}
+
+// SetPlaylistDisabled disables (hides) or enables a playlist.
+func (a *App) SetPlaylistDisabled(id int64, disabled bool) (err error) {
+	ctx, end := a.call("set_playlist_disabled", slog.Int64("playlist_id", id), slog.Bool("disabled", disabled))
+	defer end(&err)
+	svc, err := a.ready()
+	if err != nil {
+		return err
+	}
+	if err := svc.Playlists.SetDisabled(ctx, id, disabled); err != nil {
+		return err
+	}
+	a.log.InfoContext(ctx, "playlist disabled changed")
+	return nil
 }
 
 // DeletePlaylist removes a playlist and its favorites.
@@ -829,6 +846,7 @@ func toPlaylist(p playlist.Playlist) Playlist {
 		ID: p.ID, Name: p.Name, SourceType: string(p.SourceType), Source: p.DisplaySource(),
 		ChannelCount: p.ChannelCount, LastRefreshedAt: refreshed,
 		GuideSource: p.DisplayGuideSource(), GuideCustom: p.GuideURL != "", GuideUpdatedAt: guideRefreshed,
+		Disabled: p.Disabled,
 	}
 }
 

@@ -394,6 +394,27 @@ func TestReorder(t *testing.T) {
 	}
 }
 
+func TestSetDisabled(t *testing.T) {
+	ctx := context.Background()
+	svc := newServices(t)
+	id := addEmptyPlaylist(t, svc, "a")
+	if err := svc.Playlists.SetDisabled(ctx, id, true); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := svc.Playlists.Get(ctx, id); err != nil || !p.Disabled {
+		t.Errorf("after disable = %+v, %v", p, err)
+	}
+	if err := svc.Playlists.SetDisabled(ctx, id, false); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := svc.Playlists.Get(ctx, id); p.Disabled {
+		t.Error("still disabled after enable")
+	}
+	if err := svc.Playlists.SetDisabled(ctx, 999, true); !errors.Is(err, database.ErrNotFound) {
+		t.Errorf("missing playlist err = %v", err)
+	}
+}
+
 func TestReplaceChannelsRollsBackOnError(t *testing.T) {
 	ctx := context.Background()
 	svc := newServices(t)

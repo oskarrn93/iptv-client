@@ -400,6 +400,13 @@ func (s *Service) Reorder(ctx context.Context, ids []int64) error {
 	})
 }
 
+// SetDisabled disables (hides) or enables a playlist. Its channels,
+// favorites and guide are kept. Only the UI acts on it: it hides the
+// playlist and doesn't open or refresh it.
+func (s *Service) SetDisabled(ctx context.Context, id int64, disabled bool) error {
+	return s.repo.SetDisabled(ctx, id, disabled)
+}
+
 // Delete removes a playlist with its channels and favorites.
 func (s *Service) Delete(ctx context.Context, id int64) error {
 	return s.db.InTx(ctx, func(tx database.Querier) error {
