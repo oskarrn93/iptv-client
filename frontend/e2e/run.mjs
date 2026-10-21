@@ -332,6 +332,19 @@ try {
   check('new playlist selected', (await page.textContent('#playlists .selected .item-name')) === 'My Provider');
   check('import summary', (await page.textContent('#status')).includes('3 skipped'), await page.textContent('#status'));
 
+  // Edit: change a URL playlist's URL, e.g. new credentials.
+  await page.click('#playlists .list-item.selected button[title="Edit"]');
+  check('URL playlist shows its redacted URL', (await page.textContent('dialog[open]')).includes('Current: http://provider.example/…'));
+  await page.fill('dialog[open] input[name=source]', 'not a url');
+  await page.click('dialog[open] button:has-text("Save")');
+  check('invalid playlist URL keeps the dialog open', (await page.$('dialog[open]')) !== null);
+  await page.fill('dialog[open] input[name=source]', 'https://new.example/get.php?username=u&password=secret');
+  await page.click('dialog[open] button:has-text("Save")');
+  await waitFor(() => document.querySelector('#status')?.textContent?.startsWith('Changed the URL of “My Provider”'));
+  const urlCalls = await page.evaluate(() => window.__calls.filter(([m]) => m === 'SetPlaylistURL'));
+  check('playlist URL changed', JSON.stringify(urlCalls) === JSON.stringify([['SetPlaylistURL', 3, 'https://new.example/get.php?username=u&password=secret']]), JSON.stringify(urlCalls));
+  check('the playlist URL is never shown', !(await page.content()).includes('secret'));
+
   // Edit: rename and add a program guide; then delete.
   await page.click('#playlists .list-item:has-text("Small List")');
   await waitFor(() => document.querySelector('#channels-count')?.textContent === '3 channels');

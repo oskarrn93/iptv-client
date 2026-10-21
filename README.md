@@ -17,7 +17,9 @@ and SQLite.
 
 ## Features
 
-- Multiple playlists, from a URL or a local file
+- Multiple playlists, from a URL or a local file. A playlist's URL can be
+  changed with ✎ (e.g. new credentials); if the new URL fails to import, the
+  old one and its channels are kept
 - Browse by `group-title`, full-text search, favorites
 - Favorites survive playlist refreshes, even if the provider changes the
   credentials embedded in stream URLs

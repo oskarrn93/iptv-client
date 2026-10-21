@@ -103,12 +103,13 @@ func (r *Repository) MarkRefreshed(ctx context.Context, id int64, refreshedAt ti
 }
 
 // SaveRefresh records a successful refresh that replaced the channels.
-// tvgURL is the guide URL from the playlist header.
-func (r *Repository) SaveRefresh(ctx context.Context, id int64, channelCount int, etag, lastModified, tvgURL string, refreshedAt time.Time) error {
+// source is where they were read from and tvgURL is the guide URL from the
+// playlist header.
+func (r *Repository) SaveRefresh(ctx context.Context, id int64, channelCount int, source, etag, lastModified, tvgURL string, refreshedAt time.Time) error {
 	return database.ExpectOne(r.q.ExecContext(ctx, `
 		UPDATE playlists
-		SET channel_count = ?, etag = ?, last_modified = ?, last_refreshed_at = ?, tvg_url = ?
-		WHERE id = ?`, channelCount, etag, lastModified, refreshedAt.Unix(), tvgURL, id))
+		SET channel_count = ?, source = ?, etag = ?, last_modified = ?, last_refreshed_at = ?, tvg_url = ?
+		WHERE id = ?`, channelCount, source, etag, lastModified, refreshedAt.Unix(), tvgURL, id))
 }
 
 // SetGuideURL sets the user's guide URL ("" = use the playlist's).

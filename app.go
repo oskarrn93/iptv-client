@@ -299,6 +299,15 @@ func (a *App) RefreshPlaylist(id int64, force bool) (ImportResult, error) {
 		})
 }
 
+// SetPlaylistURL changes a URL playlist's URL and re-imports it. If the
+// import fails, the old URL and channels are kept.
+func (a *App) SetPlaylistURL(id int64, url string) (ImportResult, error) {
+	return a.runImport("set_playlist_url", []slog.Attr{slog.Int64("playlist_id", id)},
+		func(ctx context.Context, svc *services.Services) (playlist.Playlist, playlist.RefreshResult, error) {
+			return svc.Playlists.SetURL(ctx, id, url, a.progress)
+		})
+}
+
 // runImport runs an add or refresh under the import guard, logs its start
 // and result, and builds the result for the UI.
 func (a *App) runImport(op string, attrs []slog.Attr,

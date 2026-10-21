@@ -52,4 +52,6 @@ export function SetLogLevel(arg1:string):Promise<void>;
 
 export function SetPlaylistGuide(arg1:number,arg2:string):Promise<main.Playlist>;
 
+export function SetPlaylistURL(arg1:number,arg2:string):Promise<main.ImportResult>;
+
 export function SetUserAgent(arg1:string):Promise<void>;

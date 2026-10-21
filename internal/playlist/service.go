@@ -128,7 +128,37 @@ func (s *Service) Refresh(ctx context.Context, id int64, force bool, progress fu
 			return RefreshResult{}, &TooSoonError{Remaining: s.MinRefreshInterval - since}
 		}
 	}
+	return s.refresh(ctx, p, progress)
+}
 
+// SetURL changes the URL of a URL playlist, imports from it and returns the
+// updated playlist. The new URL is saved only if the import succeeds;
+// otherwise the old URL and channels are kept.
+func (s *Service) SetURL(ctx context.Context, id int64, url string, progress func(int)) (Playlist, RefreshResult, error) {
+	url = strings.TrimSpace(url)
+	if !fetch.IsHTTPURL(url) {
+		return Playlist{}, RefreshResult{}, errors.New("the playlist URL must be an http:// or https:// address")
+	}
+	p, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return Playlist{}, RefreshResult{}, err
+	}
+	if p.SourceType != SourceURL {
+		return Playlist{}, RefreshResult{}, errors.New("this playlist is loaded from a file, not a URL")
+	}
+	// The validators belong to the old URL.
+	p.Source, p.ETag, p.LastModified = url, "", ""
+	res, err := s.refresh(ctx, p, progress)
+	if err != nil {
+		return Playlist{}, res, err
+	}
+	// The import has committed: a cancel arriving now must not fail it.
+	p, err = s.repo.Get(context.WithoutCancel(ctx), id)
+	return p, res, err
+}
+
+// refresh imports p from p.Source.
+func (s *Service) refresh(ctx context.Context, p Playlist, progress func(int)) (RefreshResult, error) {
 	ua, err := s.settings.UserAgent(ctx)
 	if err != nil {
 		return RefreshResult{}, err
@@ -146,12 +176,13 @@ func (s *Service) Refresh(ctx context.Context, id int64, force bool, progress fu
 		return RefreshResult{}, err
 	}
 	if fr.NotModified {
-		return RefreshResult{NotModified: true}, s.repo.MarkRefreshed(ctx, id, s.Now())
+		return RefreshResult{NotModified: true}, s.repo.MarkRefreshed(ctx, p.ID, s.Now())
 	}
 	defer fr.Body.Close()
 
+	p.ETag, p.LastModified = fr.ETag, fr.LastModified
 	var res RefreshResult
-	err = s.replaceChannels(ctx, id, fr.ETag, fr.LastModified, func(insert func(channel.Input) error) (string, error) {
+	err = s.replaceChannels(ctx, p, func(insert func(channel.Input) error) (string, error) {
 		pr, err := m3u.Parse(fr.Body, func(e m3u.Entry) error {
 			if player.ValidateURL(e.URL) != nil {
 				res.Skipped++
@@ -200,18 +231,18 @@ func (s *Service) Refresh(ctx context.Context, id int64, force bool, progress fu
 // called with an insert function and should feed it every channel, then
 // return the playlist header's guide URL; if produce returns an error the
 // transaction is rolled back and the previous channels remain.
-// etag/lastModified are stored with the new data.
-func (s *Service) replaceChannels(ctx context.Context, playlistID int64, etag, lastModified string,
+// p's Source, ETag and LastModified are stored with the new data.
+func (s *Service) replaceChannels(ctx context.Context, p Playlist,
 	produce func(insert func(channel.Input) error) (tvgURL string, err error)) error {
 
 	return s.db.InTx(ctx, func(tx database.Querier) error {
 		playlists := NewRepository(tx)
-		before, err := playlists.Get(ctx, playlistID)
+		before, err := playlists.Get(ctx, p.ID)
 		if err != nil {
 			return err
 		}
 		var tvgURL string
-		n, err := channel.NewRepository(tx).ReplaceAllInPlaylist(ctx, playlistID, func(insert func(channel.Input) error) error {
+		n, err := channel.NewRepository(tx).ReplaceAllInPlaylist(ctx, p.ID, func(insert func(channel.Input) error) error {
 			var err error
 			tvgURL, err = produce(insert)
 			return err
@@ -219,7 +250,7 @@ func (s *Service) replaceChannels(ctx context.Context, playlistID int64, etag, l
 		if err != nil {
 			return err
 		}
-		if err := playlists.SaveRefresh(ctx, playlistID, n, etag, lastModified, tvgURL, s.Now()); err != nil {
+		if err := playlists.SaveRefresh(ctx, p.ID, n, p.Source, p.ETag, p.LastModified, tvgURL, s.Now()); err != nil {
 			return err
 		}
 		after := before

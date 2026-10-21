@@ -171,6 +171,58 @@ func TestRefreshPolicy(t *testing.T) {
 	}
 }
 
+func TestSetURL(t *testing.T) {
+	ctx := context.Background()
+	svc := newServices(t)
+	oldSrv := newServer(t, playlistBody)
+	p, _, err := svc.Playlists.Add(ctx, "P", oldSrv.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A failing new URL keeps the old URL and channels.
+	bad := newServer(t, "<html>Account expired</html>")
+	if _, _, err := svc.Playlists.SetURL(ctx, p.ID, bad.URL, nil); !errors.Is(err, ErrNoChannels) {
+		t.Fatalf("err = %v, want ErrNoChannels", err)
+	}
+	if got, _ := svc.Playlists.Get(ctx, p.ID); got.Source != oldSrv.URL || got.ChannelCount != 2 {
+		t.Fatalf("after failed change = %+v", got)
+	}
+
+	// The new server has the old ETag: it must not be sent, or the import
+	// would be skipped as not modified. No rate limit applies either.
+	newSrv := newServer(t, "#EXTM3U\n#EXTINF:-1,Only\nhttp://example.com/only\n")
+	got, res, err := svc.Playlists.SetURL(ctx, p.ID, " "+newSrv.URL+" ", nil)
+	if err != nil || res.NotModified || res.Imported != 1 {
+		t.Fatalf("SetURL = %+v, %v", res, err)
+	}
+	if got.Source != newSrv.URL || got.ETag != `"1"` {
+		t.Errorf("after change = %+v", got)
+	}
+	if cs := allChannels(t, svc, p.ID); len(cs) != 1 || cs[0].Name != "Only" {
+		t.Errorf("channels = %+v", cs)
+	}
+	hits := oldSrv.hits.Load()
+	if _, err := svc.Playlists.Refresh(ctx, p.ID, true, nil); err != nil || oldSrv.hits.Load() != hits {
+		t.Errorf("refresh used the old URL (err %v)", err)
+	}
+
+	if _, _, err := svc.Playlists.SetURL(ctx, p.ID, "file:///etc/passwd", nil); err == nil {
+		t.Error("file URL accepted")
+	}
+	file := filepath.Join(t.TempDir(), "list.m3u")
+	if err := os.WriteFile(file, []byte(playlistBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fp, _, err := svc.Playlists.Add(ctx, "F", file, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.Playlists.SetURL(ctx, fp.ID, newSrv.URL, nil); err == nil {
+		t.Error("file playlist got a URL")
+	}
+}
+
 func TestRefreshKeepsOldDataOnBadContent(t *testing.T) {
 	ctx := context.Background()
 	svc := newServices(t)
@@ -307,11 +359,11 @@ func TestReplaceChannelsRollsBackOnError(t *testing.T) {
 	ctx := context.Background()
 	svc := newServices(t)
 	pid := addEmptyPlaylist(t, svc, "p")
-	if err := svc.Playlists.replaceChannels(ctx, pid, "old", "", feed(sample...)); err != nil {
+	if err := svc.Playlists.replaceChannels(ctx, Playlist{ID: pid, Source: "http://e/p", ETag: "old"}, feed(sample...)); err != nil {
 		t.Fatal(err)
 	}
 	boom := errors.New("parse failed")
-	err := svc.Playlists.replaceChannels(ctx, pid, "new", "", func(insert func(channel.Input) error) (string, error) {
+	err := svc.Playlists.replaceChannels(ctx, Playlist{ID: pid, Source: "http://e/p", ETag: "new"}, func(insert func(channel.Input) error) (string, error) {
 		insert(channel.Input{Name: "Half", URL: "http://x/h"})
 		return "", boom
 	})
@@ -327,7 +379,7 @@ func TestReplaceChannelsRollsBackOnError(t *testing.T) {
 	if p, _ := svc.Playlists.Get(ctx, pid); p.ETag != "old" || p.ChannelCount != len(sample) {
 		t.Errorf("playlist updated despite rollback: %+v", p)
 	}
-	if err := svc.Playlists.replaceChannels(ctx, 12345, "", "", feed()); !errors.Is(err, database.ErrNotFound) {
+	if err := svc.Playlists.replaceChannels(ctx, Playlist{ID: 12345}, feed()); !errors.Is(err, database.ErrNotFound) {
 		t.Errorf("replace on missing playlist err = %v", err)
 	}
 }
@@ -336,7 +388,7 @@ func TestFavoritesSurviveRefreshAndCredentialChange(t *testing.T) {
 	ctx := context.Background()
 	svc := newServices(t)
 	pid := addEmptyPlaylist(t, svc, "p")
-	if err := svc.Playlists.replaceChannels(ctx, pid, "", "", feed(sample...)); err != nil {
+	if err := svc.Playlists.replaceChannels(ctx, Playlist{ID: pid, Source: "http://e/p"}, feed(sample...)); err != nil {
 		t.Fatal(err)
 	}
 	ids, _ := svc.Channels.IDs(ctx, channel.Filter{PlaylistID: pid})
@@ -355,7 +407,7 @@ func TestFavoritesSurviveRefreshAndCredentialChange(t *testing.T) {
 	}
 	refreshed[0].Group = "UK Entertainment"
 	refreshed[0].Name = "  BBC  one hd " // whitespace/case changes are tolerated
-	if err := svc.Playlists.replaceChannels(ctx, pid, "", "", feed(refreshed...)); err != nil {
+	if err := svc.Playlists.replaceChannels(ctx, Playlist{ID: pid, Source: "http://e/p"}, feed(refreshed...)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -383,8 +435,8 @@ func TestDeletePlaylistRemovesChannelsAndFavorites(t *testing.T) {
 	svc := newServices(t)
 	a := addEmptyPlaylist(t, svc, "a")
 	b := addEmptyPlaylist(t, svc, "b")
-	svc.Playlists.replaceChannels(ctx, a, "", "", feed(channel.Input{Name: "BBC Other", URL: "http://e/o"}))
-	svc.Playlists.replaceChannels(ctx, b, "", "", feed(sample...))
+	svc.Playlists.replaceChannels(ctx, Playlist{ID: a, Source: "http://e/a"}, feed(channel.Input{Name: "BBC Other", URL: "http://e/o"}))
+	svc.Playlists.replaceChannels(ctx, Playlist{ID: b, Source: "http://e/b"}, feed(sample...))
 	ids, _ := svc.Channels.IDs(ctx, channel.Filter{PlaylistID: b})
 	svc.Channels.SetFavorite(ctx, ids[0], true)
 
@@ -406,7 +458,7 @@ func TestDeletePlaylistRemovesChannelsAndFavorites(t *testing.T) {
 	if c != b {
 		t.Fatalf("new playlist ID %d, want reused %d", c, b)
 	}
-	svc.Playlists.replaceChannels(ctx, c, "", "", feed(sample...))
+	svc.Playlists.replaceChannels(ctx, Playlist{ID: c, Source: "http://e/c"}, feed(sample...))
 	if got := channelNames(t, svc, channel.Filter{PlaylistID: c, FavoritesOnly: true}); len(got) != 0 {
 		t.Errorf("favorites survived delete: %q", got)
 	}
@@ -500,7 +552,7 @@ func TestProgramGuide(t *testing.T) {
 
 	// A refresh whose header no longer names a guide drops the old one.
 	cs := allChannels(t, svc, p.ID)
-	if err := svc.Playlists.replaceChannels(ctx, p.ID, "", "", feed(channel.Input{Name: cs[0].Name, TvgID: cs[0].TvgID, URL: "http://example.com/1"})); err != nil {
+	if err := svc.Playlists.replaceChannels(ctx, Playlist{ID: p.ID, Source: p.Source}, feed(channel.Input{Name: cs[0].Name, TvgID: cs[0].TvgID, URL: "http://example.com/1"})); err != nil {
 		t.Fatal(err)
 	}
 	if got := onNow(); got != "" {
