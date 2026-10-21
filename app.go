@@ -223,6 +223,7 @@ type Settings struct {
 
 // UpdateInfo reports an update check.
 type UpdateInfo struct {
+	Current   string `json:"current"` // the running version
 	Latest    string `json:"latest"`
 	Available bool   `json:"available"`
 }
@@ -734,7 +735,7 @@ func (a *App) CheckForUpdate() (_ UpdateInfo, err error) {
 		return UpdateInfo{}, err
 	}
 	a.log.InfoContext(ctx, "update check", "latest", r.Version, "available", newer)
-	return UpdateInfo{Latest: r.Version, Available: newer}, nil
+	return UpdateInfo{Current: version, Latest: r.Version, Available: newer}, nil
 }
 
 // InstallUpdate downloads the release found by CheckForUpdate, starts its

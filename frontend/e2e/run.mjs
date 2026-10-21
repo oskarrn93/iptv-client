@@ -293,6 +293,23 @@ try {
   await page.keyboard.press('Escape');
   await page.waitForSelector('dialog[open]', { state: 'detached' });
 
+  // macOS app menu: Go sends the chosen item as an event.
+  await page.evaluate(() => window.__emit('menu-settings'));
+  await page.waitForSelector('dialog[open] .version-row');
+  await page.evaluate(() => window.__emit('menu-settings'));
+  check('menu settings opens once', (await page.$$('dialog[open]')).length === 1);
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('dialog[open]', { state: 'detached' });
+  await page.evaluate(() => {
+    window.__latest = 'v0.0.0-test';
+    document.querySelectorAll('.toast').forEach((t) => t.remove());
+  });
+  const statusBefore = await page.textContent('#status');
+  await page.evaluate(() => window.__emit('menu-check-update'));
+  await page.waitForSelector('.toast.info');
+  check('menu update check', (await page.textContent('.toast.info')).includes('latest version (v0.0.0-test)'));
+  check('menu update check restores status', (await page.textContent('#status')) === statusBefore);
+
   // Add playlist: validation, server error, success with progress.
   await page.click('#add-playlist');
   await page.waitForSelector('dialog[open]');

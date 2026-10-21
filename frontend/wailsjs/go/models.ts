@@ -225,6 +225,7 @@ export namespace main {
 	    }
 	}
 	export class UpdateInfo {
+	    current: string;
 	    latest: string;
 	    available: boolean;
 	
@@ -234,6 +235,7 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.current = source["current"];
 	        this.latest = source["latest"];
 	        this.available = source["available"];
 	    }

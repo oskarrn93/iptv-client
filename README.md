@@ -38,6 +38,8 @@ and SQLite.
   on the playlist. It is loaded with the playlist and refreshed when older
   than 12 hours. Guide channels match on `tvg-id`, else on the name
 - Channel logos from `tvg-logo` (or the guide's channel icon)
+- On macOS, the app menu has About, Check for Updates… and Settings… (⌘,),
+  and the Help menu links to GitHub and the log folder
 
 ## Security model
 
