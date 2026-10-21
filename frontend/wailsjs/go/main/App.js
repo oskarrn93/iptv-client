@@ -46,6 +46,10 @@ export function GetSettings() {
   return window['go']['main']['App']['GetSettings']();
 }
 
+export function GetTheme() {
+  return window['go']['main']['App']['GetTheme']();
+}
+
 export function InstallUpdate() {
   return window['go']['main']['App']['InstallUpdate']();
 }
@@ -104,6 +108,10 @@ export function SetPlaylistGuide(arg1, arg2) {
 
 export function SetPlaylistURL(arg1, arg2) {
   return window['go']['main']['App']['SetPlaylistURL'](arg1, arg2);
+}
+
+export function SetTheme(arg1) {
+  return window['go']['main']['App']['SetTheme'](arg1);
 }
 
 export function SetUserAgent(arg1) {

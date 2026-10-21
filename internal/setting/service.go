@@ -1,6 +1,6 @@
 // Package setting stores and validates the user's settings: the media
 // player location, the preferred audio languages, the User-Agent used to
-// download playlists and the log level.
+// download playlists, the log level and the theme.
 package setting
 
 import (
@@ -22,6 +22,14 @@ const (
 	KeyLogLevel   = "log_level"
 	// Normalized by player.NormalizeLanguages, e.g. "sv,en".
 	KeyAudioLanguages = "audio_languages"
+	KeyTheme          = "theme"
+)
+
+// Themes. ThemeNative follows the operating system.
+const (
+	ThemeNative = "native"
+	ThemeLight  = "light"
+	ThemeDark   = "dark"
 )
 
 // DefaultAudioLanguages applies until the user sets their own. Players fall
@@ -157,4 +165,24 @@ func (s *Service) SetLogLevel(ctx context.Context, level slog.Level) error {
 		return s.repo.Delete(ctx, KeyLogLevel)
 	}
 	return s.repo.Set(ctx, KeyLogLevel, logging.LevelName(level))
+}
+
+// Theme returns the theme: ThemeNative, ThemeLight or ThemeDark.
+func (s *Service) Theme(ctx context.Context) (string, error) {
+	v, err := s.repo.Get(ctx, KeyTheme)
+	if err != nil || (v != ThemeLight && v != ThemeDark) {
+		return ThemeNative, err
+	}
+	return v, nil
+}
+
+// SetTheme saves the theme: ThemeNative, ThemeLight or ThemeDark.
+func (s *Service) SetTheme(ctx context.Context, theme string) error {
+	switch theme {
+	case ThemeNative:
+		return s.repo.Delete(ctx, KeyTheme)
+	case ThemeLight, ThemeDark:
+		return s.repo.Set(ctx, KeyTheme, theme)
+	}
+	return errors.New("invalid theme")
 }

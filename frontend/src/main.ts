@@ -11,6 +11,7 @@ import {
   CopyStreamURL,
   DeletePlaylist,
   GetSettings,
+  GetTheme,
   InstallUpdate,
   ListGroups,
   ListPlaylists,
@@ -25,6 +26,7 @@ import {
   SetPlaylistGuide,
   SetAudioLanguages,
   SetPlaylistURL,
+  SetTheme,
   SetUserAgent,
 } from '../wailsjs/go/main/App';
 import { main } from '../wailsjs/go/models';
@@ -62,6 +64,7 @@ const state = {
 };
 
 const LAST_PLAYLIST_KEY = 'lastPlaylistId';
+const THEME_KEY = 'theme';
 
 const ui = {
   playlists: $<HTMLUListElement>('#playlists'),
@@ -76,6 +79,46 @@ const ui = {
   add: $<HTMLButtonElement>('#add-playlist'),
   details: $('#channel-details'),
 };
+
+// ---------- theme ----------
+
+const themes = ['native', 'light', 'dark'] as const;
+type Theme = (typeof themes)[number];
+let theme: Theme = 'native';
+
+/** Applies a theme to the page; Go applies it to the window. */
+const applyTheme = (value: string | null): void => {
+  theme = themes.find((t) => t === value) ?? 'native';
+  if (theme === 'native') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+};
+
+/** Remembers the theme for the first paint of the next start. */
+const rememberTheme = (): void => {
+  try {
+    localStorage.setItem(THEME_KEY, theme);
+  } catch {
+    // Storage is a convenience only.
+  }
+};
+
+const loadTheme = async (): Promise<void> => {
+  try {
+    applyTheme(await GetTheme());
+  } catch {
+    // The database failed to open; start() reports it.
+    return;
+  }
+  rememberTheme();
+};
+
+// The saved theme comes from Go a moment later. Applying the last one seen
+// now avoids painting the system theme first.
+try {
+  applyTheme(localStorage.getItem(THEME_KEY));
+} catch {
+  // ignore
+}
 
 // ---------- feedback ----------
 
@@ -803,6 +846,14 @@ const openSettings = async (): Promise<void> => {
     spellcheck: false,
   });
 
+  const savedTheme = theme;
+  const themeLabels: Record<Theme, string> = { native: 'Native (follow the system)', light: 'Light', dark: 'Dark' };
+  const themeSelect = h(
+    'select',
+    { id: 'theme', onchange: () => applyTheme(themeSelect.value) },
+    ...themes.map((value) => h('option', { value, selected: value === theme }, themeLabels[value])),
+  );
+
   const levels: [Level, string][] = [
     ['debug', 'Debug (until restart)'],
     ['info', 'Info'],
@@ -815,9 +866,10 @@ const openSettings = async (): Promise<void> => {
     ...levels.map(([value, label]) => h('option', { value, selected: value === settings.logLevel }, label)),
   );
 
-  await showDialog(
+  const choice = await showDialog(
     'Settings',
     [
+      h('fieldset', null, h('legend', null, 'Appearance'), h('label', null, 'Theme', themeSelect)),
       h(
         'fieldset',
         null,
@@ -879,6 +931,8 @@ const openSettings = async (): Promise<void> => {
         await SetAudioLanguages(audioLanguages.value);
         await SetUserAgent(userAgent.value);
         await SetLogLevel(logLevel.value);
+        await SetTheme(themeSelect.value);
+        rememberTheme();
         return true;
       } catch (error) {
         fail(error);
@@ -886,6 +940,8 @@ const openSettings = async (): Promise<void> => {
       }
     },
   );
+  // The theme is previewed while choosing it.
+  if (choice !== 'save') applyTheme(savedTheme);
 };
 
 // ---------- wiring ----------
@@ -971,4 +1027,5 @@ const start = async (): Promise<void> => {
   await selectPlaylist(initial?.id ?? null);
 };
 
+void loadTheme();
 void start();

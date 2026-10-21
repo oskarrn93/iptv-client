@@ -79,10 +79,13 @@ func (a *App) startup(ctx context.Context) {
 	a.log.ErrorContext(ctx, "cannot open the database", "err", err)
 }
 
-// started applies the saved log level and logs the player in use.
+// started applies the saved log level and theme, and logs the player in use.
 func (a *App) started(ctx context.Context) {
 	if level, err := a.svc.Settings.LogLevel(ctx); err == nil {
 		a.logLevel.Set(level)
+	}
+	if theme, err := a.svc.Settings.Theme(ctx); err == nil {
+		setWindowTheme(ctx, theme)
 	}
 	a.log.InfoContext(ctx, "database open", "log_level", logging.LevelName(a.logLevel.Level()))
 	// Finding the player reads the registry and searches folders; don't
@@ -674,6 +677,36 @@ func (a *App) SetUserAgent(ua string) (err error) {
 	}
 	// Never the value: a custom User-Agent can identify the account.
 	a.log.DebugContext(ctx, "user agent saved", "custom", strings.TrimSpace(ua) != "")
+	return nil
+}
+
+// GetTheme returns the theme: native, light or dark. It is separate from
+// GetSettings, which is slower (it looks for the player), so the UI can
+// apply the theme at once.
+func (a *App) GetTheme() (_ string, err error) {
+	ctx, end := a.call("get_theme")
+	defer end(&err)
+	svc, err := a.ready()
+	if err != nil {
+		return "", err
+	}
+	return svc.Settings.Theme(ctx)
+}
+
+// SetTheme saves the theme (native, light or dark) and applies it to the
+// window; the UI applies it to the page.
+func (a *App) SetTheme(theme string) (err error) {
+	ctx, end := a.call("set_theme")
+	defer end(&err)
+	svc, err := a.ready()
+	if err != nil {
+		return err
+	}
+	if err := svc.Settings.SetTheme(ctx, theme); err != nil {
+		return err
+	}
+	setWindowTheme(a.ctx, theme)
+	a.log.DebugContext(ctx, "theme saved", "theme", theme)
 	return nil
 }
 

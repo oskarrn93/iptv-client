@@ -24,6 +24,8 @@ export function DeletePlaylist(arg1:number):Promise<void>;
 
 export function GetSettings():Promise<main.Settings>;
 
+export function GetTheme():Promise<string>;
+
 export function InstallUpdate():Promise<void>;
 
 export function ListGroups(arg1:number):Promise<Array<main.Group>>;
@@ -53,5 +55,7 @@ export function SetLogLevel(arg1:string):Promise<void>;
 export function SetPlaylistGuide(arg1:number,arg2:string):Promise<main.Playlist>;
 
 export function SetPlaylistURL(arg1:number,arg2:string):Promise<main.ImportResult>;
+
+export function SetTheme(arg1:string):Promise<void>;
 
 export function SetUserAgent(arg1:string):Promise<void>;
