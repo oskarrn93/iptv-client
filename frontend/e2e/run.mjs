@@ -47,7 +47,7 @@ try {
   check('production CSP present', csp.includes("script-src 'self'") && csp.includes("object-src 'none'"));
 
   const names = await page.$$eval('#playlists .item-name', (els) => els.map((e) => e.textContent));
-  check('playlists listed alphabetically', names.join('|') === 'Big Test List|Small List', names.join('|'));
+  check('playlists listed in order', names.join('|') === 'Big Test List|Small List', names.join('|'));
   check('all channels count', /^50\D?002 channels$/.test(await count()), await count());
 
   // Untrusted names render as text.
@@ -410,6 +410,25 @@ try {
   await page.click('dialog[open] button:has-text("Delete")');
   await waitFor(() => document.querySelectorAll('#playlists li').length === 2);
   check('delete selects another playlist', (await page.$$('#playlists .selected')).length === 1);
+
+  // Reorder: drag and drop, and Alt+arrows.
+  const order = () => page.$$eval('#playlists .item-name', (els) => els.map((e) => e.textContent).join('|'));
+  check('before reorder', (await order()) === 'Big Test List|My Provider', await order());
+  await page.dragAndDrop('#playlists li:has-text("My Provider")', '#playlists li:has-text("Big Test List")', {
+    targetPosition: { x: 20, y: 4 },
+  });
+  await waitFor(() => document.querySelector('#playlists .item-name')?.textContent === 'My Provider');
+  const reorders = () => page.evaluate(() => window.__calls.filter(([m]) => m === 'ReorderPlaylists').map(([, ids]) => ids.join()));
+  check('drag and drop reorders', (await reorders()).join('|') === '3,1', (await reorders()).join('|'));
+  await page.focus('#playlists li:has-text("My Provider")');
+  await page.keyboard.press('Alt+ArrowDown');
+  await waitFor(() => document.querySelector('#playlists .item-name')?.textContent === 'Big Test List');
+  check('Alt+Down reorders', (await reorders()).at(-1) === '1,3' && (await order()) === 'Big Test List|My Provider');
+  check('focus stays on the moved playlist', await page.evaluate(() => document.activeElement?.textContent?.includes('My Provider')));
+
+  // The stub forgets added playlists on reload; leave one selected that it keeps.
+  await page.click('#playlists li:has-text("Big Test List")');
+  await titleIs('All channels');
 
   // Persisted selection survives a reload.
   const before = await page.textContent('#playlists .selected .item-name');

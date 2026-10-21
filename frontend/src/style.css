@@ -301,6 +301,16 @@ button.icon:hover {
   background: var(--surface-2);
 }
 
+.playlist.dragging {
+  opacity: 0.4;
+}
+/* Where a dragged playlist will land. */
+.playlist.drop-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+.playlist.drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
 
 /* ---------- channel list (virtualized) ---------- */
 

@@ -90,8 +90,17 @@
   window.__calls = [];
   window.__logs = [];
   const api = {
+    // playlists is kept in the user's order.
     async ListPlaylists() {
-      return [...playlists].sort((a, b) => a.name.localeCompare(b.name));
+      return [...playlists];
+    },
+    async ReorderPlaylists(ids) {
+      window.__calls.push(['ReorderPlaylists', ids]);
+      if (ids.length !== playlists.length || new Set(ids).size !== ids.length) {
+        throw 'the playlists have changed; reload and try again';
+      }
+      const ordered = ids.map(playlist);
+      playlists.splice(0, playlists.length, ...ordered);
     },
     async ListGroups(pid) {
       const groups = new Map();

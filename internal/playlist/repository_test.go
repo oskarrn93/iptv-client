@@ -27,10 +27,10 @@ func TestRepositoryCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ps) != 2 || ps[0].Name != "a list" || ps[1].Name != "B list" {
-		t.Fatalf("List = %+v", ps)
+	if len(ps) != 2 || ps[0].Name != "B list" || ps[1].Name != "a list" {
+		t.Fatalf("List = %+v, want the order of creation", ps)
 	}
-	if !ps[1].LastRefreshedAt.IsZero() {
+	if !ps[0].LastRefreshedAt.IsZero() {
 		t.Error("new playlist has LastRefreshedAt set")
 	}
 	if exists, err := r.Exists(ctx, id); err != nil || !exists {

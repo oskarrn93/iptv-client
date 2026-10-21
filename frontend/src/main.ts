@@ -20,6 +20,7 @@ import {
   RefreshGuide,
   RefreshPlaylist,
   RenamePlaylist,
+  ReorderPlaylists,
   ResetPlayer,
   SetFavorite,
   SetLogLevel,
@@ -382,33 +383,117 @@ const selectGroup = guard(async (selection: Selection) => {
 // ---------- playlists ----------
 
 const renderPlaylists = (): void => {
-  ui.playlists.replaceChildren(
-    ...state.playlists.map((p) =>
-      listItem(
-        p.id === state.playlistId,
-        'playlist',
-        () => void selectPlaylist(p.id),
-        h(
-          'div',
-          { class: 'playlist-text' },
-          h('span', { class: 'item-name', title: p.name }, p.name),
-          h(
-            'span',
-            { class: 'item-meta', title: p.source },
-            `${plural(p.channelCount, 'channel')} · ${p.sourceType === 'url' ? 'updated' : 'loaded'} ${timeAgo(p.lastRefreshedAt)}`,
-          ),
-        ),
-        h(
-          'span',
-          { class: 'item-actions' },
-          iconButton('↻', 'Refresh', () => refreshPlaylist(p)),
-          iconButton('✎', 'Edit', () => editPlaylist(p)),
-          iconButton('✕', 'Delete', () => deletePlaylist(p)),
-        ),
+  ui.playlists.replaceChildren(...state.playlists.map(playlistItem));
+};
+
+const playlistItem = (p: main.Playlist): HTMLLIElement => {
+  const li = listItem(
+    p.id === state.playlistId,
+    'playlist',
+    () => void selectPlaylist(p.id),
+    h(
+      'div',
+      { class: 'playlist-text' },
+      h('span', { class: 'item-name', title: p.name }, p.name),
+      h(
+        'span',
+        { class: 'item-meta', title: p.source },
+        `${plural(p.channelCount, 'channel')} · ${p.sourceType === 'url' ? 'updated' : 'loaded'} ${timeAgo(p.lastRefreshedAt)}`,
       ),
     ),
+    h(
+      'span',
+      { class: 'item-actions' },
+      iconButton('↻', 'Refresh', () => refreshPlaylist(p)),
+      iconButton('✎', 'Edit', () => editPlaylist(p)),
+      iconButton('✕', 'Delete', () => deletePlaylist(p)),
+    ),
   );
+  li.dataset.id = String(p.id);
+  li.draggable = true;
+  return li;
 };
+
+// ---------- playlist order ----------
+
+/** Moves playlist id next to target, before or after it, and saves the order. */
+const movePlaylist = guard(async (id: number, target: number, after: boolean) => {
+  if (id === target) return;
+  const rest = state.playlists.filter((p) => p.id !== id);
+  const moved = state.playlists.find((p) => p.id === id);
+  const i = rest.findIndex((p) => p.id === target);
+  if (!moved || i < 0) return;
+  rest.splice(after ? i + 1 : i, 0, moved);
+  state.playlists = rest;
+  renderPlaylists();
+  ui.playlists.querySelector<HTMLElement>(`li[data-id="${id}"]`)?.focus();
+  try {
+    await ReorderPlaylists(rest.map((p) => p.id));
+  } catch (error) {
+    await loadPlaylists();
+    throw error;
+  }
+});
+
+/** The playlist row an event happened in, with its playlist's ID. */
+const playlistRow = (e: Event): { li: HTMLElement; id: number } | null => {
+  const li = (e.target as HTMLElement).closest<HTMLElement>('li[data-id]');
+  return li && { li, id: Number(li.dataset.id) };
+};
+
+let dragged: number | null = null;
+
+const clearDropMarks = (): void => {
+  for (const li of ui.playlists.querySelectorAll('.drop-before, .drop-after')) {
+    li.classList.remove('drop-before', 'drop-after');
+  }
+};
+
+// Drops in the lower half of a row land after it.
+const dropsAfter = (e: DragEvent, li: HTMLElement): boolean => {
+  const { top, height } = li.getBoundingClientRect();
+  return e.clientY > top + height / 2;
+};
+
+ui.playlists.addEventListener('dragstart', (e) => {
+  dragged = playlistRow(e)?.id ?? null;
+  if (dragged === null || !e.dataTransfer) return;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', ''); // some engines only drag with data set
+  (e.target as HTMLElement).classList.add('dragging');
+});
+ui.playlists.addEventListener('dragover', (e) => {
+  const row = playlistRow(e);
+  if (dragged === null || !row) return;
+  e.preventDefault();
+  clearDropMarks();
+  if (row.id !== dragged) row.li.classList.add(dropsAfter(e, row.li) ? 'drop-after' : 'drop-before');
+});
+ui.playlists.addEventListener('dragleave', (e) => {
+  if (!ui.playlists.contains(e.relatedTarget as Node)) clearDropMarks();
+});
+ui.playlists.addEventListener('drop', (e) => {
+  const row = playlistRow(e);
+  if (dragged === null || !row) return;
+  e.preventDefault();
+  void movePlaylist(dragged, row.id, dropsAfter(e, row.li));
+});
+ui.playlists.addEventListener('dragend', () => {
+  dragged = null;
+  clearDropMarks();
+  ui.playlists.querySelector('.dragging')?.classList.remove('dragging');
+});
+
+// Alt+Up/Down moves the focused playlist past its neighbour.
+ui.playlists.addEventListener('keydown', (e) => {
+  if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+  const row = playlistRow(e);
+  const up = e.key === 'ArrowUp';
+  const neighbour = (up ? row?.li.previousElementSibling : row?.li.nextElementSibling) as HTMLElement | null;
+  if (!row || !neighbour?.dataset.id) return;
+  e.preventDefault();
+  void movePlaylist(row.id, Number(neighbour.dataset.id), !up);
+});
 
 const iconButton = (icon: string, label: string, action: () => Promise<void>): HTMLButtonElement =>
   h(
