@@ -86,6 +86,10 @@ export function RenamePlaylist(arg1, arg2) {
   return window['go']['main']['App']['RenamePlaylist'](arg1, arg2);
 }
 
+export function ReorderPlaylists(arg1) {
+  return window['go']['main']['App']['ReorderPlaylists'](arg1);
+}
+
 export function ResetPlayer() {
   return window['go']['main']['App']['ResetPlayer']();
 }

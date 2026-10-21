@@ -355,6 +355,45 @@ func addEmptyPlaylist(t *testing.T, svc *services, name string) int64 {
 	return id
 }
 
+func playlistNames(t *testing.T, svc *services) string {
+	t.Helper()
+	ps, err := svc.Playlists.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, p := range ps {
+		names = append(names, p.Name)
+	}
+	return strings.Join(names, ",")
+}
+
+func TestReorder(t *testing.T) {
+	ctx := context.Background()
+	svc := newServices(t)
+	a := addEmptyPlaylist(t, svc, "a")
+	b := addEmptyPlaylist(t, svc, "b")
+	c := addEmptyPlaylist(t, svc, "c")
+	if err := svc.Playlists.Reorder(ctx, []int64{c, a, b}); err != nil {
+		t.Fatal(err)
+	}
+	if got := playlistNames(t, svc); got != "c,a,b" {
+		t.Errorf("after reorder = %s", got)
+	}
+	addEmptyPlaylist(t, svc, "d")
+	if got := playlistNames(t, svc); got != "c,a,b,d" {
+		t.Errorf("new playlist not last: %s", got)
+	}
+	for _, ids := range [][]int64{{c, a, b}, {c, a, b, a}, {c, a, b, 999}} {
+		if err := svc.Playlists.Reorder(ctx, ids); err == nil {
+			t.Errorf("Reorder(%v) accepted", ids)
+		}
+	}
+	if got := playlistNames(t, svc); got != "c,a,b,d" {
+		t.Errorf("rejected reorder changed the order: %s", got)
+	}
+}
+
 func TestReplaceChannelsRollsBackOnError(t *testing.T) {
 	ctx := context.Background()
 	svc := newServices(t)

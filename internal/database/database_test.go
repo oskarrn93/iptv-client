@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -91,6 +92,39 @@ func TestMigrationsDownAndUp(t *testing.T) {
 	}
 	if err := m.Up(); err != nil {
 		t.Fatalf("up after down: %v", err)
+	}
+}
+
+func TestPlaylistPositionMigrationKeepsNameOrder(t *testing.T) {
+	ctx := context.Background()
+	d := openTest(t)
+	m := newMigrate(t, d)
+	if err := m.Migrate(3); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.ExecContext(ctx, `
+INSERT INTO playlists (id, name, source_type, source, created_at) VALUES
+	(1, 'b', 'url', 'x', 0), (2, 'C', 'url', 'x', 0), (3, 'a', 'url', 'x', 0), (4, 'a', 'url', 'x', 0);`); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Up(); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := d.QueryContext(ctx, `SELECT id FROM playlists ORDER BY position`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, id)
+	}
+	if fmt.Sprint(got) != "[3 4 1 2]" {
+		t.Errorf("order after migration = %v, want [3 4 1 2]", got)
 	}
 }
 

@@ -18,14 +18,15 @@ type Repository struct {
 // NewRepository returns a Repository that runs its statements on q.
 func NewRepository(q database.Querier) *Repository { return &Repository{q: q} }
 
-// Create inserts a playlist (with no channels yet) and returns its ID.
+// Create inserts a playlist (with no channels yet) at the end of the list
+// and returns its ID.
 func (r *Repository) Create(ctx context.Context, name string, t SourceType, source string, createdAt time.Time) (int64, error) {
 	if t != SourceURL && t != SourceFile {
 		return 0, fmt.Errorf("invalid source type %q", t)
 	}
 	res, err := r.q.ExecContext(ctx, `
-		INSERT INTO playlists (name, source_type, source, created_at)
-		VALUES (?, ?, ?, ?)`,
+		INSERT INTO playlists (name, source_type, source, created_at, position)
+		VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM playlists))`,
 		name, string(t), source, createdAt.Unix())
 	if err != nil {
 		return 0, err
@@ -55,13 +56,13 @@ func (r *Repository) Exists(ctx context.Context, id int64) (bool, error) {
 	return exists, err
 }
 
-// List returns all playlists ordered by name.
+// List returns all playlists in the user's order.
 func (r *Repository) List(ctx context.Context) ([]Playlist, error) {
 	rows, err := r.q.QueryContext(ctx, `
 		SELECT id, name, source_type, source, etag, last_modified, last_refreshed_at, channel_count, created_at,
 		       guide_url, tvg_url, guide_refreshed_at
 		FROM playlists
-		ORDER BY name COLLATE NOCASE, id`)
+		ORDER BY position, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -83,6 +84,14 @@ func (r *Repository) Rename(ctx context.Context, id int64, name string) error {
 		UPDATE playlists
 		SET name = ?
 		WHERE id = ?`, name, id))
+}
+
+// SetPosition sets a playlist's place in the list (lowest first).
+func (r *Repository) SetPosition(ctx context.Context, id int64, position int) error {
+	return database.ExpectOne(r.q.ExecContext(ctx, `
+		UPDATE playlists
+		SET position = ?
+		WHERE id = ?`, position, id))
 }
 
 // Delete removes a playlist row. Its channels and favorites are removed by

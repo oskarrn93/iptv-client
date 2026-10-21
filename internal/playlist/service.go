@@ -73,7 +73,7 @@ func (e *TooSoonError) Minutes() int {
 // The previously stored channels are kept.
 var ErrNoChannels = errors.New("the playlist contains no playable channels")
 
-// List returns all playlists ordered by name.
+// List returns all playlists in the user's order.
 func (s *Service) List(ctx context.Context) ([]Playlist, error) {
 	return s.repo.List(ctx)
 }
@@ -364,6 +364,40 @@ func (s *Service) Rename(ctx context.Context, id int64, name string) error {
 		return errors.New("name cannot be empty")
 	}
 	return s.repo.Rename(ctx, id, name)
+}
+
+// errOrderStale means a reorder was based on an outdated playlist list.
+var errOrderStale = errors.New("the playlists have changed; reload and try again")
+
+// Reorder puts the playlists in the order of ids, which must list every
+// playlist exactly once.
+func (s *Service) Reorder(ctx context.Context, ids []int64) error {
+	return s.db.InTx(ctx, func(tx database.Querier) error {
+		repo := NewRepository(tx)
+		ps, err := repo.List(ctx)
+		if err != nil {
+			return err
+		}
+		want := make(map[int64]bool, len(ps))
+		for _, p := range ps {
+			want[p.ID] = true
+		}
+		for _, id := range ids {
+			if !want[id] {
+				return errOrderStale
+			}
+			delete(want, id)
+		}
+		if len(want) > 0 {
+			return errOrderStale
+		}
+		for i, id := range ids {
+			if err := repo.SetPosition(ctx, id, i+1); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // Delete removes a playlist with its channels and favorites.
