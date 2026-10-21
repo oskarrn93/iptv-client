@@ -54,6 +54,8 @@ export function SetFavorite(arg1:number,arg2:boolean):Promise<void>;
 
 export function SetLogLevel(arg1:string):Promise<void>;
 
+export function SetPlaylistDisabled(arg1:number,arg2:boolean):Promise<void>;
+
 export function SetPlaylistGuide(arg1:number,arg2:string):Promise<main.Playlist>;
 
 export function SetPlaylistURL(arg1:number,arg2:string):Promise<main.ImportResult>;

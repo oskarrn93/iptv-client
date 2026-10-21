@@ -38,6 +38,7 @@
       guideSource: '',
       guideCustom: false,
       guideUpdatedAt: 0,
+      disabled: false,
     };
     playlists.push(p);
     return p;
@@ -101,6 +102,9 @@
       }
       const ordered = ids.map(playlist);
       playlists.splice(0, playlists.length, ...ordered);
+    },
+    async SetPlaylistDisabled(id, disabled) {
+      playlist(id).disabled = disabled;
     },
     async ListGroups(pid) {
       const groups = new Map();

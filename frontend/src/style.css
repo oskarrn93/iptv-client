@@ -301,6 +301,12 @@ button.icon:hover {
   background: var(--surface-2);
 }
 
+.playlist.disabled {
+  cursor: default;
+}
+.playlist.disabled .playlist-text {
+  opacity: 0.55;
+}
 .playlist.dragging {
   opacity: 0.4;
 }
@@ -310,6 +316,11 @@ button.icon:hover {
 }
 .playlist.drop-after {
   box-shadow: inset 0 -2px 0 var(--accent);
+}
+.playlists-footer {
+  align-self: flex-start;
+  margin: 0 12px 8px;
+  font-size: 12px;
 }
 
 /* ---------- channel list (virtualized) ---------- */

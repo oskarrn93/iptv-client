@@ -33,6 +33,7 @@ type Playlist struct {
 	GuideURL         string
 	TvgURL           string
 	GuideRefreshedAt time.Time // zero if the guide was never imported
+	Disabled         bool      // hidden from the playlist list
 }
 
 // GuideSource is the program guide URL in use, "" if there is none.

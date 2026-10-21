@@ -24,6 +24,7 @@ import {
   ResetPlayer,
   SetFavorite,
   SetLogLevel,
+  SetPlaylistDisabled,
   SetPlaylistGuide,
   SetAudioLanguages,
   SetPlaylistURL,
@@ -62,6 +63,7 @@ const state = {
   selection: { kind: 'all' } as Selection,
   search: '',
   importing: false,
+  showDisabled: false,
 };
 
 const LAST_PLAYLIST_KEY = 'lastPlaylistId';
@@ -78,6 +80,7 @@ const ui = {
   cancel: $<HTMLButtonElement>('#cancel-import'),
   toasts: $('#toasts'),
   add: $<HTMLButtonElement>('#add-playlist'),
+  showDisabled: $<HTMLButtonElement>('#show-disabled'),
   details: $('#channel-details'),
 };
 
@@ -311,7 +314,9 @@ const renderEmpty = (): void => {
           h('button', { class: 'primary', type: 'button', onclick: () => void addPlaylist() }, 'Add your first playlist'),
         )
       : state.playlistId === null
-        ? 'Select a playlist.'
+        ? firstEnabled()
+          ? 'Select a playlist.'
+          : 'All playlists are disabled.'
         : list.size > 0
           ? null
           : state.search
@@ -382,30 +387,38 @@ const selectGroup = guard(async (selection: Selection) => {
 
 // ---------- playlists ----------
 
+const firstEnabled = (): main.Playlist | undefined => state.playlists.find((p) => !p.disabled);
+
 const renderPlaylists = (): void => {
-  ui.playlists.replaceChildren(...state.playlists.map(playlistItem));
+  const disabled = state.playlists.filter((p) => p.disabled).length;
+  ui.playlists.replaceChildren(
+    ...state.playlists.filter((p) => state.showDisabled || !p.disabled).map(playlistItem),
+  );
+  ui.showDisabled.hidden = disabled === 0;
+  ui.showDisabled.textContent = state.showDisabled ? 'Hide disabled' : `Show ${formatCount(disabled)} disabled`;
 };
 
 const playlistItem = (p: main.Playlist): HTMLLIElement => {
+  const meta = `${plural(p.channelCount, 'channel')} · ${p.sourceType === 'url' ? 'updated' : 'loaded'} ${timeAgo(p.lastRefreshedAt)}`;
   const li = listItem(
     p.id === state.playlistId,
-    'playlist',
-    () => void selectPlaylist(p.id),
+    p.disabled ? 'playlist disabled' : 'playlist',
+    () => !p.disabled && void selectPlaylist(p.id),
     h(
       'div',
       { class: 'playlist-text' },
       h('span', { class: 'item-name', title: p.name }, p.name),
-      h(
-        'span',
-        { class: 'item-meta', title: p.source },
-        `${plural(p.channelCount, 'channel')} · ${p.sourceType === 'url' ? 'updated' : 'loaded'} ${timeAgo(p.lastRefreshedAt)}`,
-      ),
+      h('span', { class: 'item-meta', title: p.source }, p.disabled ? `Disabled · ${meta}` : meta),
     ),
     h(
       'span',
       { class: 'item-actions' },
-      iconButton('↻', 'Refresh', () => refreshPlaylist(p)),
-      iconButton('✎', 'Edit', () => editPlaylist(p)),
+      // Editing may download the playlist or its guide: enable it first.
+      !p.disabled && iconButton('↻', 'Refresh', () => refreshPlaylist(p)),
+      !p.disabled && iconButton('✎', 'Edit', () => editPlaylist(p)),
+      p.disabled
+        ? iconButton('✓', 'Enable', () => setPlaylistDisabled(p, false))
+        : iconButton('⊘', 'Disable', () => setPlaylistDisabled(p, true)),
       iconButton('✕', 'Delete', () => deletePlaylist(p)),
     ),
   );
@@ -484,7 +497,7 @@ ui.playlists.addEventListener('dragend', () => {
   ui.playlists.querySelector('.dragging')?.classList.remove('dragging');
 });
 
-// Alt+Up/Down moves the focused playlist past its neighbour.
+// Alt+Up/Down moves the focused playlist past its visible neighbour.
 ui.playlists.addEventListener('keydown', (e) => {
   if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
   const row = playlistRow(e);
@@ -513,6 +526,7 @@ const iconButton = (icon: string, label: string, action: () => Promise<void>): H
 
 const loadPlaylists = async (): Promise<void> => {
   state.playlists = await ListPlaylists();
+  if (!state.playlists.some((p) => p.disabled)) state.showDisabled = false;
   renderPlaylists();
 };
 
@@ -797,8 +811,21 @@ const deletePlaylist = guard(async (p: main.Playlist) => {
   if (!ok) return;
   await DeletePlaylist(p.id);
   await loadPlaylists();
-  if (state.playlistId === p.id) await selectPlaylist(state.playlists[0]?.id ?? null);
+  if (state.playlistId === p.id) await selectPlaylist(firstEnabled()?.id ?? null);
   setStatus(`Deleted “${p.name}”`);
+});
+
+const setPlaylistDisabled = guard(async (p: main.Playlist, disabled: boolean) => {
+  // The import may be of this playlist; hiding it would orphan the progress.
+  if (disabled && state.importing) {
+    toast('Wait for the import to finish.');
+    return;
+  }
+  await SetPlaylistDisabled(p.id, disabled);
+  await loadPlaylists();
+  if (disabled && state.playlistId === p.id) await selectPlaylist(firstEnabled()?.id ?? null);
+  else if (!disabled && state.playlistId === null) await selectPlaylist(p.id);
+  setStatus(disabled ? `Disabled “${p.name}”` : `Enabled “${p.name}”`);
 });
 
 // ---------- settings ----------
@@ -1070,6 +1097,10 @@ ui.search.addEventListener('keydown', (e) => {
   }
 });
 ui.add.addEventListener('click', () => void addPlaylist());
+ui.showDisabled.addEventListener('click', () => {
+  state.showDisabled = !state.showDisabled;
+  renderPlaylists();
+});
 ui.cancel.addEventListener('click', () => void CancelImport());
 $('#settings-button').addEventListener('click', () => void openSettings());
 
@@ -1108,7 +1139,7 @@ const start = async (): Promise<void> => {
   } catch {
     // ignore
   }
-  const initial = state.playlists.find((p) => p.id === last) ?? state.playlists[0];
+  const initial = state.playlists.find((p) => p.id === last && !p.disabled) ?? firstEnabled();
   await selectPlaylist(initial?.id ?? null);
 };
 

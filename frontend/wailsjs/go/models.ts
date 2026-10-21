@@ -102,6 +102,7 @@ export namespace main {
 	    guideSource: string;
 	    guideCustom: boolean;
 	    guideUpdatedAt: number;
+	    disabled: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Playlist(source);
@@ -118,6 +119,7 @@ export namespace main {
 	        this.guideSource = source["guideSource"];
 	        this.guideCustom = source["guideCustom"];
 	        this.guideUpdatedAt = source["guideUpdatedAt"];
+	        this.disabled = source["disabled"];
 	    }
 	}
 	export class GuideResult {
