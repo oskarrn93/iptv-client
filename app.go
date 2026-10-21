@@ -240,7 +240,7 @@ const UpdateProgressEvent = "update-progress"
 
 // --- playlists ---
 
-// ListPlaylists returns all playlists.
+// ListPlaylists returns all playlists in the user's order.
 func (a *App) ListPlaylists() (_ []Playlist, err error) {
 	ctx, end := a.call("list_playlists")
 	defer end(&err)
@@ -411,6 +411,18 @@ func (a *App) RenamePlaylist(id int64, name string) (err error) {
 		return err
 	}
 	return svc.Playlists.Rename(ctx, id, name)
+}
+
+// ReorderPlaylists puts the playlists in the order of ids, which must list
+// every playlist exactly once.
+func (a *App) ReorderPlaylists(ids []int64) (err error) {
+	ctx, end := a.call("reorder_playlists")
+	defer end(&err)
+	svc, err := a.ready()
+	if err != nil {
+		return err
+	}
+	return svc.Playlists.Reorder(ctx, ids)
 }
 
 // DeletePlaylist removes a playlist and its favorites.
