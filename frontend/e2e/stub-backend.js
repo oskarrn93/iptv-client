@@ -243,6 +243,13 @@
       if (codes.length > 10 || codes.some((c) => !/^[a-z]{2,3}$/.test(c))) throw 'invalid language code';
       window.__audioLanguages = codes.join(',') || 'en';
     },
+    async GetTheme() {
+      return window.__theme ?? 'native';
+    },
+    async SetTheme(theme) {
+      if (!['native', 'light', 'dark'].includes(theme)) throw 'invalid theme';
+      window.__theme = theme;
+    },
     async SetUserAgent(ua) {
       if (/[\r\n]/.test(ua)) throw 'invalid User-Agent';
       window.__userAgent = ua;

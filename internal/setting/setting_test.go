@@ -139,3 +139,26 @@ func TestLogLevel(t *testing.T) {
 		t.Errorf("info stored as %q, want deleted", v)
 	}
 }
+
+func TestTheme(t *testing.T) {
+	ctx := context.Background()
+	svc := newService(t)
+	if got, err := svc.Theme(ctx); err != nil || got != ThemeNative {
+		t.Errorf("default Theme = %q, %v", got, err)
+	}
+	if err := svc.SetTheme(ctx, ThemeDark); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := svc.Theme(ctx); got != ThemeDark {
+		t.Errorf("Theme = %q, want dark", got)
+	}
+	if err := svc.SetTheme(ctx, "purple"); err == nil {
+		t.Error("invalid theme accepted")
+	}
+	if err := svc.SetTheme(ctx, ThemeNative); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := svc.repo.Get(ctx, KeyTheme); v != "" {
+		t.Errorf("native stored as %q, want deleted", v)
+	}
+}

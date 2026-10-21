@@ -16,8 +16,11 @@
   color-scheme: light;
 }
 
+/* data-theme is set when the user overrides the system theme in Settings.
+   The two dark blocks must match (e2e checks): light-dark() would avoid the
+   copy but needs Safari 17.5, newer than the oldest supported macOS. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --bg: #181a1f;
     --surface: #1f2228;
     --surface-2: #272b32;
@@ -34,6 +37,24 @@
     --shadow: 0 8px 30px rgb(0 0 0 / 0.5);
     color-scheme: dark;
   }
+}
+
+:root[data-theme='dark'] {
+  --bg: #181a1f;
+  --surface: #1f2228;
+  --surface-2: #272b32;
+  --border: #33373f;
+  --text: #e6e8eb;
+  --muted: #8d949e;
+  --accent: #5b8ff0;
+  --accent-text: #0e1116;
+  --selected: #253248;
+  --selected-strong: #2e3f5c;
+  --danger: #ef6b6b;
+  --star: #f2c14e;
+  --ok: #4cc27f;
+  --shadow: 0 8px 30px rgb(0 0 0 / 0.5);
+  color-scheme: dark;
 }
 
 * {
@@ -279,6 +300,7 @@ button.icon:hover {
   color: var(--text);
   background: var(--surface-2);
 }
+
 
 /* ---------- channel list (virtualized) ---------- */
 

@@ -233,6 +233,45 @@ try {
   check('settings save', (await page.evaluate(() => window.__userAgent)) === 'MyPlayer/1.0');
   check('audio languages save', (await page.evaluate(() => window.__audioLanguages)) === 'sv,en');
 
+  // Theme: previewed while choosing, reverted on cancel, saved on save.
+  const bg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  const palette = () =>
+    page.evaluate(() => {
+      const style = getComputedStyle(document.documentElement);
+      return [...document.styleSheets[0].cssRules[0].style].map((v) => style.getPropertyValue(v)).join();
+    });
+  const openTheme = async () => {
+    await page.click('#settings-button');
+    await page.waitForSelector('dialog[open] #theme');
+  };
+  const saveTheme = async (value) => {
+    await openTheme();
+    await page.selectOption('#theme', value);
+    await page.click('dialog[open] button:has-text("Save")');
+    await page.waitForSelector('dialog[open]', { state: 'detached' });
+  };
+  await page.emulateMedia({ colorScheme: 'dark' });
+  const systemDark = await palette();
+  await page.emulateMedia({ colorScheme: 'light' });
+  const lightBg = await bg();
+  await openTheme();
+  check('theme defaults to native', (await page.inputValue('#theme')) === 'native');
+  await page.selectOption('#theme', 'dark');
+  check('theme previewed', (await bg()) !== lightBg, await bg());
+  await page.click('dialog[open] button:has-text("Cancel")');
+  // The dialog loses [open] before its close event runs the revert.
+  await waitFor(() => !document.documentElement.dataset.theme);
+  check('cancel reverts the theme', (await bg()) === lightBg);
+  await saveTheme('dark');
+  check('theme saved', (await page.evaluate(() => window.__theme)) === 'dark');
+  check('dark theme matches the system dark palette', systemDark.includes('#181a1f') && (await palette()) === systemDark, systemDark);
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await saveTheme('light');
+  check('light theme overrides a dark system', (await bg()) === lightBg, await bg());
+  await saveTheme('native');
+  check('native theme follows the system', (await palette()) === systemDark);
+  await page.emulateMedia({ colorScheme: 'light' });
+
   // An invalid language keeps the dialog open with an error.
   await page.click('#settings-button');
   await page.waitForSelector('dialog[open] #audio-languages');
