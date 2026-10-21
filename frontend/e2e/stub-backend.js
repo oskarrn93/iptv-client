@@ -173,7 +173,7 @@
       for (const c of byPlaylist(id)) channels.delete(c.id);
     },
     async AddPlaylistURL(name, url) {
-      if (!/^https?:\/\//i.test(url)) throw 'only http:// and https:// playlist URLs are supported';
+      if (!isHTTP(url)) throw 'only http:// and https:// playlist URLs are supported';
       for (const n of [1000, 2000]) {
         await delay(50);
         emit('import-progress', n);

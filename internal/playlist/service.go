@@ -180,8 +180,9 @@ func (s *Service) refresh(ctx context.Context, p Playlist, progress func(int)) (
 	}
 	defer fr.Body.Close()
 
+	p.ETag, p.LastModified = fr.ETag, fr.LastModified
 	var res RefreshResult
-	err = s.replaceChannels(ctx, p.ID, p.Source, fr.ETag, fr.LastModified, func(insert func(channel.Input) error) (string, error) {
+	err = s.replaceChannels(ctx, p, func(insert func(channel.Input) error) (string, error) {
 		pr, err := m3u.Parse(fr.Body, func(e m3u.Entry) error {
 			if player.ValidateURL(e.URL) != nil {
 				res.Skipped++
@@ -230,19 +231,18 @@ func (s *Service) refresh(ctx context.Context, p Playlist, progress func(int)) (
 // called with an insert function and should feed it every channel, then
 // return the playlist header's guide URL; if produce returns an error the
 // transaction is rolled back and the previous channels remain.
-// source (where the channels were read from) and etag/lastModified are
-// stored with the new data.
-func (s *Service) replaceChannels(ctx context.Context, playlistID int64, source, etag, lastModified string,
+// p's Source, ETag and LastModified are stored with the new data.
+func (s *Service) replaceChannels(ctx context.Context, p Playlist,
 	produce func(insert func(channel.Input) error) (tvgURL string, err error)) error {
 
 	return s.db.InTx(ctx, func(tx database.Querier) error {
 		playlists := NewRepository(tx)
-		before, err := playlists.Get(ctx, playlistID)
+		before, err := playlists.Get(ctx, p.ID)
 		if err != nil {
 			return err
 		}
 		var tvgURL string
-		n, err := channel.NewRepository(tx).ReplaceAllInPlaylist(ctx, playlistID, func(insert func(channel.Input) error) error {
+		n, err := channel.NewRepository(tx).ReplaceAllInPlaylist(ctx, p.ID, func(insert func(channel.Input) error) error {
 			var err error
 			tvgURL, err = produce(insert)
 			return err
@@ -250,7 +250,7 @@ func (s *Service) replaceChannels(ctx context.Context, playlistID int64, source,
 		if err != nil {
 			return err
 		}
-		if err := playlists.SaveRefresh(ctx, playlistID, n, source, etag, lastModified, tvgURL, s.Now()); err != nil {
+		if err := playlists.SaveRefresh(ctx, p.ID, n, p.Source, p.ETag, p.LastModified, tvgURL, s.Now()); err != nil {
 			return err
 		}
 		after := before

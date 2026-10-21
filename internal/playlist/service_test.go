@@ -359,11 +359,11 @@ func TestReplaceChannelsRollsBackOnError(t *testing.T) {
 	ctx := context.Background()
 	svc := newServices(t)
 	pid := addEmptyPlaylist(t, svc, "p")
-	if err := svc.Playlists.replaceChannels(ctx, pid, "http://e/p", "old", "", feed(sample...)); err != nil {
+	if err := svc.Playlists.replaceChannels(ctx, Playlist{ID: pid, Source: "http://e/p", ETag: "old"}, feed(sample...)); err != nil {
 		t.Fatal(err)
 	}
 	boom := errors.New("parse failed")
-	err := svc.Playlists.replaceChannels(ctx, pid, "http://e/p", "new", "", func(insert func(channel.Input) error) (string, error) {
+	err := svc.Playlists.replaceChannels(ctx, Playlist{ID: pid, Source: "http://e/p", ETag: "new"}, func(insert func(channel.Input) error) (string, error) {
 		insert(channel.Input{Name: "Half", URL: "http://x/h"})
 		return "", boom
 	})
@@ -379,7 +379,7 @@ func TestReplaceChannelsRollsBackOnError(t *testing.T) {
 	if p, _ := svc.Playlists.Get(ctx, pid); p.ETag != "old" || p.ChannelCount != len(sample) {
 		t.Errorf("playlist updated despite rollback: %+v", p)
 	}
-	if err := svc.Playlists.replaceChannels(ctx, 12345, "", "", "", feed()); !errors.Is(err, database.ErrNotFound) {
+	if err := svc.Playlists.replaceChannels(ctx, Playlist{ID: 12345}, feed()); !errors.Is(err, database.ErrNotFound) {
 		t.Errorf("replace on missing playlist err = %v", err)
 	}
 }
@@ -388,7 +388,7 @@ func TestFavoritesSurviveRefreshAndCredentialChange(t *testing.T) {
 	ctx := context.Background()
 	svc := newServices(t)
 	pid := addEmptyPlaylist(t, svc, "p")
-	if err := svc.Playlists.replaceChannels(ctx, pid, "http://e/p", "", "", feed(sample...)); err != nil {
+	if err := svc.Playlists.replaceChannels(ctx, Playlist{ID: pid, Source: "http://e/p"}, feed(sample...)); err != nil {
 		t.Fatal(err)
 	}
 	ids, _ := svc.Channels.IDs(ctx, channel.Filter{PlaylistID: pid})
@@ -407,7 +407,7 @@ func TestFavoritesSurviveRefreshAndCredentialChange(t *testing.T) {
 	}
 	refreshed[0].Group = "UK Entertainment"
 	refreshed[0].Name = "  BBC  one hd " // whitespace/case changes are tolerated
-	if err := svc.Playlists.replaceChannels(ctx, pid, "http://e/p", "", "", feed(refreshed...)); err != nil {
+	if err := svc.Playlists.replaceChannels(ctx, Playlist{ID: pid, Source: "http://e/p"}, feed(refreshed...)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -435,8 +435,8 @@ func TestDeletePlaylistRemovesChannelsAndFavorites(t *testing.T) {
 	svc := newServices(t)
 	a := addEmptyPlaylist(t, svc, "a")
 	b := addEmptyPlaylist(t, svc, "b")
-	svc.Playlists.replaceChannels(ctx, a, "http://e/a", "", "", feed(channel.Input{Name: "BBC Other", URL: "http://e/o"}))
-	svc.Playlists.replaceChannels(ctx, b, "http://e/b", "", "", feed(sample...))
+	svc.Playlists.replaceChannels(ctx, Playlist{ID: a, Source: "http://e/a"}, feed(channel.Input{Name: "BBC Other", URL: "http://e/o"}))
+	svc.Playlists.replaceChannels(ctx, Playlist{ID: b, Source: "http://e/b"}, feed(sample...))
 	ids, _ := svc.Channels.IDs(ctx, channel.Filter{PlaylistID: b})
 	svc.Channels.SetFavorite(ctx, ids[0], true)
 
@@ -458,7 +458,7 @@ func TestDeletePlaylistRemovesChannelsAndFavorites(t *testing.T) {
 	if c != b {
 		t.Fatalf("new playlist ID %d, want reused %d", c, b)
 	}
-	svc.Playlists.replaceChannels(ctx, c, "http://e/c", "", "", feed(sample...))
+	svc.Playlists.replaceChannels(ctx, Playlist{ID: c, Source: "http://e/c"}, feed(sample...))
 	if got := channelNames(t, svc, channel.Filter{PlaylistID: c, FavoritesOnly: true}); len(got) != 0 {
 		t.Errorf("favorites survived delete: %q", got)
 	}
@@ -552,7 +552,7 @@ func TestProgramGuide(t *testing.T) {
 
 	// A refresh whose header no longer names a guide drops the old one.
 	cs := allChannels(t, svc, p.ID)
-	if err := svc.Playlists.replaceChannels(ctx, p.ID, p.Source, "", "", feed(channel.Input{Name: cs[0].Name, TvgID: cs[0].TvgID, URL: "http://example.com/1"})); err != nil {
+	if err := svc.Playlists.replaceChannels(ctx, Playlist{ID: p.ID, Source: p.Source}, feed(channel.Input{Name: cs[0].Name, TvgID: cs[0].TvgID, URL: "http://example.com/1"})); err != nil {
 		t.Fatal(err)
 	}
 	if got := onNow(); got != "" {

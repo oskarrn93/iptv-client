@@ -644,12 +644,14 @@ const editPlaylist = guard(async (p: main.Playlist) => {
   );
   if (!choice) return;
   const url = source.value.trim();
-  const label = name.value.trim() || p.name;
-  const result = url ? await runImport(`Importing “${label}” from the new URL`, () => SetPlaylistURL(p.id, url)) : null;
-  if (result) {
-    setStatus(`Changed the URL of “${label}”: ${describeImport(result)}`);
-    await reloadAfterImport(p, result); // also loads the guide, which the new playlist may name
-    return;
+  if (url) {
+    const label = name.value.trim() || p.name;
+    const result = await runImport(`Importing “${label}” from the new URL`, () => SetPlaylistURL(p.id, url));
+    if (result) {
+      setStatus(`Changed the URL of “${label}”: ${describeImport(result)}`);
+      await reloadAfterImport(p, result); // also loads the guide, which the new playlist may name
+      return;
+    }
   }
   await loadPlaylists();
   const updated = state.playlists.find((x) => x.id === p.id);
