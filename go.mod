@@ -4,12 +4,14 @@ go 1.26.0
 
 require (
 	github.com/golang-migrate/migrate/v4 v4.20.1
-	github.com/wailsapp/wails/v2 v2.16.0
+	github.com/wailsapp/wails/v2 v2.17.0
 	golang.org/x/mod v0.42.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/text v0.43.0
-	modernc.org/sqlite v1.60.1
+	modernc.org/sqlite v1.61.0
 )
+
+require github.com/gabriel-vasile/mimetype v1.4.16 // indirect
 
 require (
 	atomicgo.dev/cursor v0.2.0 // indirect
@@ -98,7 +100,6 @@ require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/wailsapp/go-webview2 v1.0.23 // indirect
-	github.com/wailsapp/mimetype v1.4.1 // indirect
 	github.com/wzshiming/ctc v1.2.3 // indirect
 	github.com/wzshiming/winseq v0.0.0-20200720163736-7fa652d2b50e // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
@@ -115,7 +116,7 @@ require (
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	howett.net/plist v1.0.2-0.20250314012144-ee69052608d9 // indirect
-	modernc.org/libc v1.77.1 // indirect
+	modernc.org/libc v1.79.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
