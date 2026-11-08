@@ -510,6 +510,10 @@ button.play {
   white-space: nowrap;
   overflow: hidden;
 }
+.update-available {
+  margin-left: auto;
+  font-weight: 600;
+}
 #status {
   overflow: hidden;
   text-overflow: ellipsis;

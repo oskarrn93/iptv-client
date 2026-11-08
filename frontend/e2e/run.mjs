@@ -42,6 +42,7 @@ try {
   await page.goto(url);
   await waitFor(() => document.querySelector('#channels-count')?.textContent?.includes('channel'));
   await shot('01-initial');
+  check('no update button when up to date', await page.evaluate(() => document.querySelector('#update-available').hidden));
 
   const csp = await page.evaluate(() => document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.content ?? '');
   check('production CSP present', csp.includes("script-src 'self'") && csp.includes("object-src 'none'"));
@@ -339,6 +340,18 @@ try {
   );
   // The deliberate error is not a problem with the app.
   problems.splice(0, problems.length, ...problems.filter((p) => !p.includes('e2e boom')));
+
+  // A newer release found by the startup check shows a button in the status bar.
+  const updatePage = await browser.newPage({ viewport: { width: 1200, height: 760 } });
+  await updatePage.addInitScript(() => (window.__latest = 'v9.9.9'));
+  await updatePage.goto(url);
+  await updatePage.waitForSelector('#update-available:not([hidden])');
+  check('update button offered at startup', (await updatePage.textContent('#update-available')) === 'Update to v9.9.9');
+  if (shots) await updatePage.screenshot({ path: join(shots, '05a-update-available.png') });
+  await updatePage.click('#update-available');
+  await updatePage.waitForSelector('dialog[open]');
+  check('update button opens the install dialog', (await updatePage.textContent('dialog[open]')).includes('v9.9.9 is available'));
+  await updatePage.close();
 
   // Updates: up to date, then a newer release confirmed and installed.
   await page.click('#settings-button');

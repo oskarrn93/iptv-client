@@ -11,7 +11,7 @@ same toolchain but have not yet been verified on a Mac (see
 |---|---|---|
 | Git | any recent | source control |
 | Go | 1.27.3 (go.mod requires ≥ 1.27.3) | backend, build tool |
-| Node.js | 26 LTS, with npm 11 (pinned in `frontend/.nvmrc`, which CI also reads) | builds the frontend (Vite + TypeScript) |
+| Node.js | 26.13.0, with npm 11 (pinned in `frontend/.nvmrc`, which CI also reads) | builds the frontend (Vite + TypeScript) |
 | Wails CLI | v2.17.1 | **not installed globally** — pinned in `go.mod` and run with `go tool wails` |
 | WebView2 runtime | preinstalled on Windows 10/11 | renders the UI on Windows |
 | Xcode Command Line Tools | macOS only | C compiler for the macOS webview (CGO) |
