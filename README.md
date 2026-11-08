@@ -21,6 +21,9 @@ and SQLite.
   changed with ✎ (e.g. new credentials); if the new URL fails to import, the
   old one and its channels are kept
 - Browse by `group-title`, full-text search, favorites
+- URL playlists refresh themselves in the background once a day, while the
+  app runs (checked at startup and then hourly; disabled playlists are
+  skipped). The status bar shows progress, and Cancel stops it
 - Favorites survive playlist refreshes, even if the provider changes the
   credentials embedded in stream URLs
 - Handles very large playlists (200k channels import in about 3 seconds)
@@ -37,8 +40,8 @@ and SQLite.
 - Program guide (XMLTV/EPG, plain or `.gz`): what is on now in the channel
   list, and now/next with a description for the selected channel. The guide
   URL comes from the playlist's `url-tvg`/`x-tvg-url` header or is set with ✎
-  on the playlist. It is loaded with the playlist and refreshed when older
-  than 12 hours. Guide channels match on `tvg-id`, else on the name
+  on the playlist. It is loaded with the playlist and refreshed in the
+  background when older than 12 hours. Guide channels match on `tvg-id`, else on the name
 - Channel logos from `tvg-logo` (or the guide's channel icon)
 - On macOS, the app menu has About, Check for Updates… and Settings… (⌘,),
   and the Help menu links to GitHub and the log folder

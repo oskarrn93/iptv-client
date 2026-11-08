@@ -547,64 +547,109 @@ const selectPlaylist = guard(async (id: number | null) => {
   if (id !== state.playlistId) return; // the user moved on
   state.groups = groups;
   renderGroups();
-  const p = state.playlists.find((x) => x.id === id);
-  if (p && guideStale(p) && !guideTried.has(p.id) && !state.importing) {
-    guideTried.add(p.id);
-    await refreshGuide(p);
-  }
 });
 
 // ---------- program guide ----------
 
-const GUIDE_MAX_AGE = 12 * 3600; // seconds
-
-const guideStale = (p: main.Playlist): boolean =>
-  p.guideSource !== '' && Date.now() / 1000 - p.guideUpdatedAt > GUIDE_MAX_AGE;
-
-// Playlists whose stale guide was refreshed automatically this session, so
-// a failing guide is not retried (with an error) on every visit.
-const guideTried = new Set<number>();
-
 const refreshGuide = async (p: main.Playlist): Promise<void> => {
-  const result = await runImport(`Updating the program guide of “${p.name}”`, () => RefreshGuide(p.id), 'programme');
+  const result = await runImport(() => RefreshGuide(p.id));
   if (!result) return;
   setStatus(
     `Updated the program guide of “${p.name}”: ${plural(result.programmes, 'programme')} ` +
       `for ${plural(result.channels, 'channel')}`,
   );
   await loadPlaylists();
-  if (state.playlistId === p.id) {
+  await reloadGuide(p.id);
+};
+
+/** Shows the new guide of playlist id. */
+const reloadGuide = async (id: number): Promise<void> => {
+  if (state.playlistId === id) {
     list.reload();
     showDetails(detailsChannel);
   }
 };
 
-/** Runs an import with progress in the status bar; one at a time. */
-const runImport = async <T>(label: string, task: () => Promise<T>, unit = 'channel'): Promise<T | null> => {
-  if (state.importing) {
-    toast('Another import is running.');
-    return null;
+// ---------- imports ----------
+
+/** An ImportEvent (importguard.go): an import started or ended in the app. */
+interface ImportState {
+  running: boolean;
+  op: string;
+  playlistId: number;
+}
+
+const importLabel = (s: ImportState): [label: string, unit: string] => {
+  const name = state.playlists.find((x) => x.id === s.playlistId)?.name ?? '';
+  switch (s.op) {
+    case 'add_playlist':
+      return ['Importing playlist', 'channel'];
+    case 'set_playlist_url':
+      return [`Importing “${name}” from the new URL`, 'channel'];
+    case 'refresh_guide':
+      return [`Updating the program guide of “${name}”`, 'programme'];
+    default:
+      return [`Refreshing “${name}”`, 'channel'];
   }
-  state.importing = true;
-  ui.add.disabled = true;
-  ui.cancel.hidden = false;
-  setStatus(`${label}…`);
-  const stop = EventsOn('import-progress', (n: number) => setStatus(`${label}… ${plural(n, unit)}`));
+};
+
+// The app runs one import at a time, started here or by its background
+// sync; it reports them all, so the UI shows whichever runs.
+let stopProgress: (() => void) | null = null;
+let progressText = '';
+
+const showProgress = (text: string): void => {
+  progressText = text;
+  setStatus(text);
+};
+
+EventsOn('import', (s: ImportState) => {
+  stopProgress?.();
+  stopProgress = null;
+  state.importing = s.running;
+  ui.add.disabled = s.running;
+  ui.cancel.hidden = !s.running;
+  if (!s.running) {
+    // Clear the progress, unless the import's result is already shown.
+    if (ui.status.textContent === progressText) setStatus('');
+    return;
+  }
+  const [label, unit] = importLabel(s);
+  showProgress(`${label}…`);
+  stopProgress = EventsOn('import-progress', (n: number) => showProgress(`${label}… ${plural(n, unit)}`));
+});
+
+/** Runs an import; the app refuses it while another one runs. */
+const runImport = async <T>(task: () => Promise<T>): Promise<T | null> => {
   try {
     return await task();
   } catch (error) {
     fail(error);
-    setStatus('');
     return null;
-  } finally {
-    stop();
-    state.importing = false;
-    ui.add.disabled = false;
-    ui.cancel.hidden = true;
   }
 };
 
 const describeImport = (r: main.ImportResult): string =>
+/** A SyncEvent: a background refresh of stale data ended (sync.go). */
+interface SyncUpdate {
+  playlistId: number;
+  guide: boolean;
+  changed: boolean;
+  error: string;
+}
+
+const onSync = guard(async (u: SyncUpdate) => {
+  const name = state.playlists.find((x) => x.id === u.playlistId)?.name ?? 'a playlist';
+  const what = u.guide ? `the program guide of “${name}”` : `“${name}”`;
+  // Not a toast: a failing provider would interrupt every hour.
+  setStatus(u.error ? `Could not update ${what}: ${u.error}` : u.changed ? `Updated ${what}` : '');
+  if (!u.changed) return;
+  if (u.guide) await reloadGuide(u.playlistId);
+  else await reloadChannels(u.playlistId, true);
+});
+
+EventsOn('sync', (u: SyncUpdate) => void onSync(u));
+
   `${plural(r.imported, 'channel')} imported` +
   (r.skipped ? ` · ${formatCount(r.skipped)} skipped (unsupported or unsafe stream URLs)` : '');
 
@@ -639,7 +684,7 @@ const addPlaylist = async (): Promise<void> => {
   );
   if (!choice) return;
 
-  const result = await runImport('Importing playlist', () =>
+  const result = await runImport(() =>
     choice === 'url' ? AddPlaylistURL(name.value, url.value.trim()) : AddPlaylistFile(name.value),
   );
   if (!result?.playlist) {
@@ -655,7 +700,10 @@ const addPlaylist = async (): Promise<void> => {
     }
   }
   await loadPlaylists();
-  await selectPlaylist(result.playlist.id); // also loads the guide
+  const id = result.playlist.id;
+  await selectPlaylist(id);
+  const added = state.playlists.find((x) => x.id === id);
+  if (added?.guideSource) await refreshGuide(added);
 };
 
 const playlistURLInput = (): HTMLInputElement =>
@@ -685,7 +733,7 @@ const checkHTTPURL = (input: HTMLInputElement): boolean => {
 };
 
 const refreshPlaylist = async (p: main.Playlist, force = false): Promise<void> => {
-  const result = await runImport(`Refreshing “${p.name}”`, () => RefreshPlaylist(p.id, force));
+  const result = await runImport(() => RefreshPlaylist(p.id, force));
   if (!result) return;
   if (result.tooSoonMinutes > 0) {
     setStatus('');
@@ -706,9 +754,19 @@ const refreshPlaylist = async (p: main.Playlist, force = false): Promise<void> =
 /** Shows the result of a refresh or URL change of playlist p. */
 const reloadAfterImport = async (p: main.Playlist, result: main.ImportResult): Promise<void> => {
   // Channel IDs change on refresh, so reload everything for this playlist.
-  const reload = state.playlistId === p.id && !result.notModified;
-  const [, groups] = await Promise.all([loadPlaylists(), reload ? ListGroups(p.id) : null]);
-  if (groups && state.playlistId === p.id) {
+  await reloadChannels(p.id, !result.notModified);
+  // A refresh asks for fresh data, and the playlist may name a new guide.
+  // An unchanged playlist can't, and its channels still match the guide,
+  // which the background sync keeps fresh.
+  const updated = state.playlists.find((x) => x.id === p.id);
+  if (updated?.guideSource && !result.notModified) await refreshGuide(updated);
+};
+
+/** Reloads the playlists and, if playlist id is shown and changed, its channels. */
+const reloadChannels = async (id: number, changed: boolean): Promise<void> => {
+  const reload = state.playlistId === id && changed;
+  const [, groups] = await Promise.all([loadPlaylists(), reload ? ListGroups(id) : null]);
+  if (groups && state.playlistId === id) {
     const selection = state.selection;
     state.groups = groups;
     const stillExists = selection.kind !== 'group' || state.groups.some((g) => g.name === selection.name);
@@ -716,10 +774,6 @@ const reloadAfterImport = async (p: main.Playlist, result: main.ImportResult): P
     renderGroups();
     await loadChannels();
   }
-  // A refresh asks for fresh data, and the playlist may name a new guide.
-  // An unchanged playlist can't, and its channels still match the guide.
-  const updated = state.playlists.find((x) => x.id === p.id);
-  if (updated?.guideSource && (!result.notModified || guideStale(updated))) await refreshGuide(updated);
 };
 
 const editPlaylist = guard(async (p: main.Playlist) => {
@@ -788,7 +842,7 @@ const editPlaylist = guard(async (p: main.Playlist) => {
   const url = source.value.trim();
   if (url) {
     const label = name.value.trim() || p.name;
-    const result = await runImport(`Importing “${label}” from the new URL`, () => SetPlaylistURL(p.id, url));
+    const result = await runImport(() => SetPlaylistURL(p.id, url));
     if (result) {
       setStatus(`Changed the URL of “${label}”: ${describeImport(result)}`);
       await reloadAfterImport(p, result); // also loads the guide, which the new playlist may name

@@ -60,3 +60,23 @@ func (p Playlist) DisplayGuideSource() string {
 	}
 	return ""
 }
+
+// MaxAge and GuideMaxAge are how old a playlist's channels and its program
+// guide get before the background sync refreshes them. Both must stay well
+// above DefaultMinRefreshInterval.
+const (
+	MaxAge      = 24 * time.Hour
+	GuideMaxAge = 12 * time.Hour
+)
+
+// Due reports whether the background sync should refresh p's channels at
+// now. File playlists are not synced: they change only when the user says.
+func (p Playlist) Due(now time.Time) bool {
+	return p.SourceType == SourceURL && !p.Disabled && now.Sub(p.LastRefreshedAt) >= MaxAge
+}
+
+// GuideDue reports whether the background sync should refresh p's program
+// guide at now.
+func (p Playlist) GuideDue(now time.Time) bool {
+	return p.GuideSource() != "" && !p.Disabled && now.Sub(p.GuideRefreshedAt) >= GuideMaxAge
+}

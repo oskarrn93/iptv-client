@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -43,18 +44,22 @@ type App struct {
 	imports  importGuard
 	updater  *update.Updater
 	logos    *logo.Cache // nil until the database is open
+	syncMu   sync.Mutex
+	stopSync func() // nil until the background sync runs; guarded by syncMu
 }
 
 // NewApp creates the application. It logs to log, whose level is
 // logLevel, and logDir is the folder OpenLogFolder shows.
 func NewApp(log *slog.Logger, logLevel *slog.LevelVar, logDir string) *App {
-	return &App{
+	a := &App{
 		log:      log,
 		logLevel: logLevel,
 		logDir:   logDir,
 		uiLog:    logging.NewUI(log),
 		updater:  &update.Updater{Current: version, UserAgent: "iptv-client/" + version},
 	}
+	a.imports.notify = func(s ImportState) { runtime.EventsEmit(a.ctx, ImportEvent, s) }
+	return a
 }
 
 // errNoDatabase means the database failed to open at startup.
@@ -102,6 +107,13 @@ func (a *App) started(ctx context.Context) {
 
 func (a *App) shutdown(ctx context.Context) {
 	a.log.InfoContext(ctx, "shutting down")
+	a.imports.close()
+	a.syncMu.Lock()
+	stop := a.stopSync
+	a.syncMu.Unlock()
+	if stop != nil {
+		stop()
+	}
 	if a.db != nil {
 		a.db.Close()
 	}
@@ -135,7 +147,7 @@ func (a *App) call(op string, attrs ...slog.Attr) (ctx context.Context, end func
 // expectedError reports errors that are part of normal use, or were
 // already logged.
 func expectedError(err error) bool {
-	return errors.Is(err, errImportRunning) ||
+	return errors.Is(err, errImportRunning) || errors.Is(err, errClosing) ||
 		errors.Is(err, database.ErrNotFound) || errors.Is(err, errNoDatabase) ||
 		errors.Is(err, playlist.ErrNoGuide) ||
 		errors.Is(err, context.Canceled)
@@ -283,7 +295,7 @@ func (a *App) AddPlaylistFile(name string) (ImportResult, error) {
 }
 
 func (a *App) add(name, source string, typ playlist.SourceType) (ImportResult, error) {
-	return a.runImport("add_playlist", []slog.Attr{slog.String("source_type", string(typ))},
+	return a.runImport("add_playlist", 0, []slog.Attr{slog.String("source_type", string(typ))},
 		func(ctx context.Context, svc *services.Services) (playlist.Playlist, playlist.RefreshResult, error) {
 			return svc.Playlists.Add(ctx, name, source, a.progress)
 		})
@@ -292,7 +304,7 @@ func (a *App) add(name, source string, typ playlist.SourceType) (ImportResult, e
 // RefreshPlaylist re-imports a playlist. Without force, URL playlists are
 // rate limited and TooSoonMinutes is set instead of returning an error.
 func (a *App) RefreshPlaylist(id int64, force bool) (ImportResult, error) {
-	return a.runImport("refresh_playlist", []slog.Attr{slog.Int64("playlist_id", id), slog.Bool("force", force)},
+	return a.runImport("refresh_playlist", id, []slog.Attr{slog.Int64("playlist_id", id), slog.Bool("force", force)},
 		func(ctx context.Context, svc *services.Services) (playlist.Playlist, playlist.RefreshResult, error) {
 			res, err := svc.Playlists.Refresh(ctx, id, force, a.progress)
 			if err != nil {
@@ -307,7 +319,7 @@ func (a *App) RefreshPlaylist(id int64, force bool) (ImportResult, error) {
 // SetPlaylistURL changes a URL playlist's URL and re-imports it. If the
 // import fails, the old URL and channels are kept.
 func (a *App) SetPlaylistURL(id int64, url string) (ImportResult, error) {
-	return a.runImport("set_playlist_url", []slog.Attr{slog.Int64("playlist_id", id)},
+	return a.runImport("set_playlist_url", id, []slog.Attr{slog.Int64("playlist_id", id)},
 		func(ctx context.Context, svc *services.Services) (playlist.Playlist, playlist.RefreshResult, error) {
 			return svc.Playlists.SetURL(ctx, id, url, a.progress)
 		})
@@ -315,7 +327,7 @@ func (a *App) SetPlaylistURL(id int64, url string) (ImportResult, error) {
 
 // runImport runs an add or refresh under the import guard, logs its start
 // and result, and builds the result for the UI.
-func (a *App) runImport(op string, attrs []slog.Attr,
+func (a *App) runImport(op string, playlistID int64, attrs []slog.Attr,
 	run func(context.Context, *services.Services) (playlist.Playlist, playlist.RefreshResult, error)) (_ ImportResult, err error) {
 
 	ctx, end := a.call(op, attrs...)
@@ -324,7 +336,7 @@ func (a *App) runImport(op string, attrs []slog.Attr,
 	if err != nil {
 		return ImportResult{}, err
 	}
-	ctx, done, err := a.imports.begin(ctx)
+	ctx, done, err := a.imports.begin(ctx, op, playlistID)
 	if err != nil {
 		return ImportResult{}, err
 	}
@@ -377,7 +389,7 @@ func (a *App) RefreshGuide(id int64) (_ GuideResult, err error) {
 	if err != nil {
 		return GuideResult{}, err
 	}
-	ctx, done, err := a.imports.begin(ctx)
+	ctx, done, err := a.imports.begin(ctx, "refresh_guide", id)
 	if err != nil {
 		return GuideResult{}, err
 	}

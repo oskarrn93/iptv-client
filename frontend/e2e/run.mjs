@@ -219,6 +219,30 @@ try {
   check('refresh anyway forces', forced.join() === 'false,true', forced.join());
   check('refresh also updates the guide', await page.evaluate(() => window.__calls.some(([m]) => m === 'RefreshGuide')));
 
+  // Background sync: shown like an import, then the playlist is reloaded.
+  await page.evaluate(() => window.__stubSyncStart({ playlistId: 1 }));
+  await waitFor(() => document.querySelector('#status')?.textContent === 'Refreshing “Big Test List”…');
+  check('sync shows a cancellable import', !(await page.isHidden('#cancel-import')) && (await page.isDisabled('#add-playlist')));
+  await page.click('#playlists .list-item.selected button[title="Refresh"]');
+  await page.waitForSelector('.toast:has-text("another playlist is being imported")');
+  check('the app refuses a second import', true);
+  await page.click('.toast.error'); // dismiss, so later checks see their own toast
+  await page.evaluate(() => {
+    const api = window.go.main.App;
+    const listGroups = api.ListGroups;
+    window.__groupLoads = 0;
+    api.ListGroups = (...args) => (window.__groupLoads++, listGroups(...args));
+  });
+  await page.evaluate(() => window.__stubSyncEnd({ changed: true }));
+  await waitFor(() => document.querySelector('#status')?.textContent === 'Updated “Big Test List”');
+  check('sync reloads the shown playlist', (await page.evaluate(() => window.__groupLoads)) === 1 && (await page.isHidden('#cancel-import')));
+  await page.evaluate(() => {
+    window.__stubSyncStart({ playlistId: 1, guide: true });
+    window.__stubSyncEnd({ error: 'program guide: HTTP 503' });
+  });
+  await waitFor(() => document.querySelector('#status')?.textContent?.startsWith('Could not update'));
+  check('sync failure shown in the status bar', (await page.textContent('#status')) === 'Could not update the program guide of “Big Test List”: program guide: HTTP 503');
+
   // Settings.
   await page.click('#settings-button');
   await page.waitForSelector('dialog[open] .player-status.ok');
@@ -395,6 +419,7 @@ try {
   await page.click('dialog[open] button:has-text("Save")');
   check('invalid guide URL keeps the dialog open', (await page.$('dialog[open]')) !== null);
   await page.fill('dialog[open] input[type=url]', 'https://epg.example/guide.xml.gz?user=u&pass=p');
+  await page.fill('dialog[open] input[type=number]', '-1');
   await shot('08-edit-playlist');
   await page.click('dialog[open] button:has-text("Save")');
   await page.waitForSelector('#playlists .item-name:has-text("Renamed List")');

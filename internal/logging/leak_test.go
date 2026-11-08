@@ -43,6 +43,10 @@ func TestNoSecretsInLogFiles(t *testing.T) {
 	svc := playlist.NewService(db, setting.NewService(db))
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ok.m3u" {
+			_, _ = w.Write([]byte("#EXTM3U\n#EXTINF:-1,A\nhttp://s/a\n"))
+			return
+		}
 		http.Error(w, "nope", http.StatusForbidden)
 	}))
 	defer srv.Close()
@@ -59,6 +63,16 @@ func TestNoSecretsInLogFiles(t *testing.T) {
 	fail("add_playlist", err)
 	_, _, err = svc.Add(ctx, "", "http://"+host+"/live/user/"+secret+"/list.m3u", nil)
 	fail("add_playlist", err)
+	// A guide refresh (what the background sync runs) from a URL with a secret.
+	p, _, err := svc.Add(ctx, "", srv.URL+"/ok.m3u", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SetGuideURL(ctx, p.ID, "http://"+host+"/xmltv/"+secret+"/guide.xml"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.RefreshGuide(ctx, p.ID, nil)
+	fail("refresh_guide", err)
 	// A local playlist under the home directory that does not exist. File
 	// names are kept; only the home directory (the user name) is hidden.
 	_, _, err = svc.Add(ctx, "", filepath.Join(home, "no-such-dir", "list.m3u"), nil)
