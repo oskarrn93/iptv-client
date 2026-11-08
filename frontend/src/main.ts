@@ -50,7 +50,7 @@ import {
   setSelected,
   timeAgo,
 } from './dom';
-import { installErrorHandlers, type Level } from './log';
+import { installErrorHandlers, log, type Level } from './log';
 import { showMenu } from './menu';
 
 installErrorHandlers();
@@ -79,6 +79,7 @@ const ui = {
   empty: $('#empty'),
   status: $('#status'),
   cancel: $<HTMLButtonElement>('#cancel-import'),
+  updateAvailable: $<HTMLButtonElement>('#update-available'),
   toasts: $('#toasts'),
   add: $<HTMLButtonElement>('#add-playlist'),
   showDisabled: $<HTMLButtonElement>('#show-disabled'),
@@ -907,9 +908,29 @@ const setPlaylistDisabled = guard(async (p: main.Playlist, disabled: boolean) =>
 let checkingForUpdates = false;
 
 /**
- * Finds a newer release and offers to install it, reporting progress through
- * busy. Returns true if the app is restarting into the update.
+ * Offers a newer release and installs it if confirmed, reporting progress
+ * through busy. Returns true if the app is restarting into the update.
  */
+const offerUpdate = async (info: main.UpdateInfo, busy: (text: string) => void): Promise<boolean> => {
+  const ok = await confirmDialog(
+    `Update to ${info.latest}?`,
+    `IPTV Client ${info.latest} is available (you have ${info.current}). ` +
+      'It will be downloaded and installed, and the app will restart.',
+    'Install and restart',
+  );
+  if (!ok) return false;
+  busy('Downloading…');
+  const stop = EventsOn('update-progress', (pct: number) => busy(`Downloading… ${pct}%`));
+  try {
+    await InstallUpdate();
+    busy('Restarting…');
+    return true;
+  } finally {
+    stop();
+  }
+};
+
+/** Finds a newer release and offers it. Returns true if the app is restarting. */
 const checkForUpdates = async (busy: (text: string) => void): Promise<boolean> => {
   if (checkingForUpdates) return false;
   checkingForUpdates = true;
@@ -920,26 +941,47 @@ const checkForUpdates = async (busy: (text: string) => void): Promise<boolean> =
       toast(`You have the latest version (${info.current}).`, 'info');
       return false;
     }
-    const ok = await confirmDialog(
-      `Update to ${info.latest}?`,
-      `IPTV Client ${info.latest} is available (you have ${info.current}). ` +
-        'It will be downloaded and installed, and the app will restart.',
-      'Install and restart',
-    );
-    if (!ok) return false;
-    busy('Downloading…');
-    const stop = EventsOn('update-progress', (pct: number) => busy(`Downloading… ${pct}%`));
-    try {
-      await InstallUpdate();
-      busy('Restarting…');
-      return true;
-    } finally {
-      stop();
-    }
+    return await offerUpdate(info, busy);
   } finally {
     checkingForUpdates = false;
   }
 };
+
+let pendingUpdate: main.UpdateInfo | null = null;
+
+/** Shows a status bar button when a release is newer than the running version. */
+const checkForUpdatesQuietly = async (): Promise<void> => {
+  if (checkingForUpdates) return;
+  let info: main.UpdateInfo;
+  try {
+    info = await CheckForUpdate();
+  } catch (error) {
+    // Offline or rate limited: not worth interrupting the user.
+    log.debug('background update check failed', { error: errorMessage(error) });
+    return;
+  }
+  if (!info.available || checkingForUpdates) return;
+  pendingUpdate = info;
+  ui.updateAvailable.textContent = `Update to ${info.latest}`;
+  ui.updateAvailable.hidden = false;
+};
+
+ui.updateAvailable.addEventListener('click', async () => {
+  if (!pendingUpdate || checkingForUpdates) return;
+  checkingForUpdates = true;
+  const button = ui.updateAvailable;
+  const before = button.textContent;
+  button.disabled = true;
+  try {
+    if (await offerUpdate(pendingUpdate, (text) => (button.textContent = text))) return;
+  } catch (error) {
+    fail(error);
+  } finally {
+    checkingForUpdates = false;
+  }
+  button.disabled = false;
+  button.textContent = before;
+});
 
 /** "Check for updates…" in Settings. */
 const updateButton = (): HTMLButtonElement => {
@@ -1218,3 +1260,5 @@ const start = async (): Promise<void> => {
 
 void loadTheme();
 void start();
+void checkForUpdatesQuietly();
+setInterval(() => void checkForUpdatesQuietly(), 60 * 60 * 1000);
