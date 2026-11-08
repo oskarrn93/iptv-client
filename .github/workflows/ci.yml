@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # Nightly run is fuzz-only, with a much longer fuzz time.
+  schedule:
+    - cron: '0 3 * * *'
   # build.yml runs these checks before building release binaries.
   workflow_call:
 
@@ -14,16 +17,19 @@ permissions:
 jobs:
   # Core packages are pure Go, so they are tested on cheap Linux runners.
   test:
+    if: github.event_name != 'schedule'
     uses: oskarrn93/github-actions/.github/workflows/go-test.yml@cf66633427573d9d5b3a1e0969f3d0575fdd681f # v1
     with:
       packages: ./internal/... ./cmd/...
 
   govulncheck:
+    if: github.event_name != 'schedule'
     uses: oskarrn93/github-actions/.github/workflows/govulncheck.yml@cf66633427573d9d5b3a1e0969f3d0575fdd681f # v1
     with:
       packages: ./internal/... ./cmd/...
 
   actionlint:
+    if: github.event_name != 'schedule'
     uses: oskarrn93/github-actions/.github/workflows/actionlint.yml@cf66633427573d9d5b3a1e0969f3d0575fdd681f # v1
 
   # Fuzzing runs here because Windows Smart App Control can block the
@@ -34,17 +40,24 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {pkg: ./internal/m3u, target: FuzzParse, time: 60s}
-          - {pkg: ./internal/redact, target: FuzzString, time: 30s}
-          - {pkg: ./internal/epg, target: FuzzParse, time: 30s}
+          - {pkg: ./internal/m3u, target: FuzzParse, pr: 15s, nightly: 10m}
+          - {pkg: ./internal/redact, target: FuzzString, pr: 15s, nightly: 10m}
+          - {pkg: ./internal/epg, target: FuzzParse, pr: 15s, nightly: 10m}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - run: go test ${{ matrix.pkg }} -run '^$' -fuzz ${{ matrix.target }} -fuzztime ${{ matrix.time }}
+      - run: go test ${{ matrix.pkg }} -run '^$' -fuzz ${{ matrix.target }} -fuzztime ${{ github.event_name == 'schedule' && matrix.nightly || matrix.pr }}
+      # A crashing input is only written into the runner's checkout.
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-${{ matrix.pkg == './internal/m3u' && 'm3u' || matrix.pkg == './internal/epg' && 'epg' || 'redact' }}
+          path: internal/*/testdata/fuzz
 
   frontend:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -69,6 +82,7 @@ jobs:
   # Release binaries are built by build.yml. This job keeps the Windows-only
   # checks on PRs, e.g. so a Dependabot Wails bump that changes bindings fails.
   windows:
+    if: github.event_name != 'schedule'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
