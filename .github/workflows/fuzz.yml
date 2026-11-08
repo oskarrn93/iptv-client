@@ -1,0 +1,49 @@
+name: Fuzz
+
+on:
+  workflow_call:
+    inputs:
+      fuzztime:
+        type: string
+        required: true
+      # Keeps the corpus between runs and uploads crashing inputs, which
+      # otherwise only exist in the runner's checkout.
+      persist:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {pkg: ./internal/m3u, target: FuzzParse, name: m3u}
+          - {pkg: ./internal/redact, target: FuzzString, name: redact}
+          - {pkg: ./internal/epg, target: FuzzParse, name: epg}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - if: inputs.persist
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/go-build/fuzz
+          key: fuzz-corpus-${{ matrix.name }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.name }}-
+      - run: go test ${{ matrix.pkg }} -run '^$' -fuzz ${{ matrix.target }} -fuzztime ${{ inputs.fuzztime }}
+      - if: always() && inputs.persist
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/go-build/fuzz
+          key: fuzz-corpus-${{ matrix.name }}-${{ github.run_id }}
+      - if: failure() && inputs.persist
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-${{ matrix.name }}
+          path: internal/*/testdata/fuzz
