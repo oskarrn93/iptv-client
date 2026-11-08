@@ -1,4 +1,17 @@
 {
+  "enabledPlugins": {
+    "gopls-lsp@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true,
+    "golang@oskarrn93-plugins": true,
+    "typescript@oskarrn93-plugins": true,
+    "git@oskarrn93-plugins": true,
+    "gh-stack@oskarrn93-plugins": true
+  },
+  "extraKnownMarketplaces": {
+    "oskarrn93-plugins": {
+      "source": { "source": "github", "repo": "oskarrn93/claude-plugins" }
+    }
+  },
   "hooks": {
     "PreToolUse": [
       {
