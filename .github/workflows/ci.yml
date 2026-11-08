@@ -13,18 +13,28 @@ permissions:
 
 jobs:
   # Core packages are pure Go, so they are tested on cheap Linux runners.
+  test:
+    uses: oskarrn93/github-actions/.github/workflows/go-test.yml@cf66633427573d9d5b3a1e0969f3d0575fdd681f # v1
+    with:
+      packages: ./internal/... ./cmd/...
+
+  govulncheck:
+    uses: oskarrn93/github-actions/.github/workflows/govulncheck.yml@cf66633427573d9d5b3a1e0969f3d0575fdd681f # v1
+    with:
+      packages: ./internal/... ./cmd/...
+
+  actionlint:
+    uses: oskarrn93/github-actions/.github/workflows/actionlint.yml@cf66633427573d9d5b3a1e0969f3d0575fdd681f # v1
+
   # Fuzzing runs here because Windows Smart App Control can block the
   # instrumented fuzz binary on developer machines.
-  test:
+  fuzz:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - run: test -z "$(gofmt -l .)" || (gofmt -l .; exit 1)
-      - run: go vet ./internal/... ./cmd/...
-      - run: go test ./internal/... ./cmd/...
       - run: go test ./internal/m3u -run '^$' -fuzz FuzzParse -fuzztime 60s
       - run: go test ./internal/redact -run '^$' -fuzz FuzzString -fuzztime 30s
       - run: go test ./internal/epg -run '^$' -fuzz FuzzParse -fuzztime 30s
