@@ -630,6 +630,9 @@ const runImport = async <T>(task: () => Promise<T>): Promise<T | null> => {
 };
 
 const describeImport = (r: main.ImportResult): string =>
+  `${plural(r.imported, 'channel')} imported` +
+  (r.skipped ? ` · ${formatCount(r.skipped)} skipped (unsupported or unsafe stream URLs)` : '');
+
 /** A SyncEvent: a background refresh of stale data ended (sync.go). */
 interface SyncUpdate {
   playlistId: number;
@@ -649,9 +652,6 @@ const onSync = guard(async (u: SyncUpdate) => {
 });
 
 EventsOn('sync', (u: SyncUpdate) => void onSync(u));
-
-  `${plural(r.imported, 'channel')} imported` +
-  (r.skipped ? ` · ${formatCount(r.skipped)} skipped (unsupported or unsafe stream URLs)` : '');
 
 const addPlaylist = async (): Promise<void> => {
   const name = h('input', { type: 'text', placeholder: 'Optional — e.g. My provider', autocomplete: 'off' });
