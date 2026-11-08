@@ -26,6 +26,7 @@ import {
   SetLogLevel,
   SetPlaylistDisabled,
   SetPlaylistGuide,
+  SetPlaylistTitleTimeOffset,
   SetAudioLanguages,
   SetPlaylistURL,
   SetTheme,
@@ -558,12 +559,12 @@ const refreshGuide = async (p: main.Playlist): Promise<void> => {
     `Updated the program guide of “${p.name}”: ${plural(result.programmes, 'programme')} ` +
       `for ${plural(result.channels, 'channel')}`,
   );
-  await loadPlaylists();
   await reloadGuide(p.id);
 };
 
 /** Shows the new guide of playlist id. */
 const reloadGuide = async (id: number): Promise<void> => {
+  await loadPlaylists();
   if (state.playlistId === id) {
     list.reload();
     showDetails(detailsChannel);
@@ -753,7 +754,6 @@ const refreshPlaylist = async (p: main.Playlist, force = false): Promise<void> =
 
 /** Shows the result of a refresh or URL change of playlist p. */
 const reloadAfterImport = async (p: main.Playlist, result: main.ImportResult): Promise<void> => {
-  // Channel IDs change on refresh, so reload everything for this playlist.
   await reloadChannels(p.id, !result.notModified);
   // A refresh asks for fresh data, and the playlist may name a new guide.
   // An unchanged playlist can't, and its channels still match the guide,
@@ -764,6 +764,7 @@ const reloadAfterImport = async (p: main.Playlist, result: main.ImportResult): P
 
 /** Reloads the playlists and, if playlist id is shown and changed, its channels. */
 const reloadChannels = async (id: number, changed: boolean): Promise<void> => {
+  // Channel IDs change on refresh, so reload everything for this playlist.
   const reload = state.playlistId === id && changed;
   const [, groups] = await Promise.all([loadPlaylists(), reload ? ListGroups(id) : null]);
   if (groups && state.playlistId === id) {
@@ -778,6 +779,7 @@ const reloadChannels = async (id: number, changed: boolean): Promise<void> => {
 
 const editPlaylist = guard(async (p: main.Playlist) => {
   const name = h('input', { type: 'text', value: p.name, required: true, autocomplete: 'off', spellcheck: false });
+  const offset = h('input', { type: 'number', value: p.titleTimeOffset, min: -23, max: 23, step: 1, required: true });
   const isURL = p.sourceType === 'url';
   const source = playlistURLInput();
   const guide = guideInput();
@@ -803,6 +805,7 @@ const editPlaylist = guard(async (p: main.Playlist) => {
   renderGuide();
 
   let reload = false;
+  let retitle = false;
   const choice = await showDialog(
     'Edit playlist',
     [
@@ -816,6 +819,12 @@ const editPlaylist = guard(async (p: main.Playlist) => {
       h('label', null, 'Program guide (EPG) URL', guide),
       guideStatus,
       h('div', { class: 'row' }, reset),
+      h('label', null, 'Time offset in titles (hours)', offset),
+      h(
+        'p',
+        { class: 'hint' },
+        'Added to times like 21:45 in channel and program titles, for providers that write them in another time zone. Use -1 if the title says 21:45 and it is 20:45 for you.',
+      ),
     ],
     [
       { label: 'Cancel', value: '' },
@@ -826,6 +835,15 @@ const editPlaylist = guard(async (p: main.Playlist) => {
       try {
         const newName = name.value.trim();
         if (newName && newName !== p.name) await RenamePlaylist(p.id, newName);
+        const hours = Number(offset.value);
+        if (!Number.isInteger(hours) || Math.abs(hours) > 23) {
+          toast('The time offset must be a whole number of hours between -23 and 23.');
+          return false;
+        }
+        if (hours !== p.titleTimeOffset) {
+          await SetPlaylistTitleTimeOffset(p.id, hours);
+          retitle = true;
+        }
         const url = guide.value.trim();
         if (url || useDefault) {
           const updated = await SetPlaylistGuide(p.id, url);
@@ -850,6 +868,7 @@ const editPlaylist = guard(async (p: main.Playlist) => {
     }
   }
   await loadPlaylists();
+  if (retitle && state.playlistId === p.id) list.reload();
   const updated = state.playlists.find((x) => x.id === p.id);
   if (reload && updated) await refreshGuide(updated);
   else if (state.playlistId === p.id) showDetails(detailsChannel);

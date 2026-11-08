@@ -423,6 +423,8 @@ try {
   await page.click('dialog[open] button:has-text("Save")');
   await page.waitForSelector('#playlists .item-name:has-text("Renamed List")');
   check('rename', true);
+  const offsetCalls = await page.evaluate(() => window.__calls.filter(([m]) => m === 'SetPlaylistTitleTimeOffset'));
+  check('title time offset saved', JSON.stringify(offsetCalls) === JSON.stringify([['SetPlaylistTitleTimeOffset', 2, -1]]), JSON.stringify(offsetCalls));
   await waitFor(() => document.querySelector('#status')?.textContent?.startsWith('Updated the program guide'));
   const guideCalls = await page.evaluate(() => window.__calls.filter(([m]) => m === 'SetPlaylistGuide' || m === 'RefreshGuide'));
   check('guide URL saved and loaded', JSON.stringify(guideCalls.slice(-2)) === JSON.stringify([['SetPlaylistGuide', 2, 'https://epg.example/guide.xml.gz?user=u&pass=p'], ['RefreshGuide', 2]]), JSON.stringify(guideCalls));

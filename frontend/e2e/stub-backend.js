@@ -39,6 +39,7 @@
       guideCustom: false,
       guideUpdatedAt: 0,
       disabled: false,
+      titleTimeOffset: 0,
     };
     playlists.push(p);
     return p;
@@ -124,6 +125,10 @@
       }
       const ordered = ids.map(playlist);
       playlists.splice(0, playlists.length, ...ordered);
+    },
+    async SetPlaylistTitleTimeOffset(id, hours) {
+      window.__calls.push(['SetPlaylistTitleTimeOffset', id, hours]);
+      playlist(id).titleTimeOffset = hours;
     },
     async SetPlaylistDisabled(id, disabled) {
       playlist(id).disabled = disabled;
