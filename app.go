@@ -167,6 +167,7 @@ type Playlist struct {
 	GuideCustom     bool   `json:"guideCustom"`     // the guide URL was set by the user
 	GuideUpdatedAt  int64  `json:"guideUpdatedAt"`  // unix seconds, 0 = never
 	Disabled        bool   `json:"disabled"`        // hidden from the list unless shown
+	TitleTimeOffset int    `json:"titleTimeOffset"` // hours added to times in titles
 }
 
 // Group is a channel group with its size.
@@ -454,6 +455,32 @@ func (a *App) SetPlaylistDisabled(id int64, disabled bool) (err error) {
 	return nil
 }
 
+// SetPlaylistTitleTimeOffset sets the hours added to clock times in the
+// playlist's channel and programme titles, which providers write in their
+// own time zone.
+func (a *App) SetPlaylistTitleTimeOffset(id int64, hours int) (err error) {
+	ctx, end := a.call("set_playlist_title_time_offset", slog.Int64("playlist_id", id), slog.Int("hours", hours))
+	defer end(&err)
+	svc, err := a.ready()
+	if err != nil {
+		return err
+	}
+	return svc.Playlists.SetTitleTimeOffset(ctx, id, hours)
+}
+
+// titleOffsets returns each playlist's TitleTimeOffset.
+func titleOffsets(ctx context.Context, svc *services.Services) (map[int64]int, error) {
+	ps, err := svc.Playlists.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]int, len(ps))
+	for _, p := range ps {
+		out[p.ID] = p.TitleTimeOffset
+	}
+	return out, nil
+}
+
 // DeletePlaylist removes a playlist and its favorites.
 func (a *App) DeletePlaylist(id int64) (err error) {
 	ctx, end := a.call("delete_playlist", slog.Int64("playlist_id", id))
@@ -527,12 +554,17 @@ func (a *App) Channels(ids []int64) (_ []Channel, err error) {
 		// The guide is decoration; still show the channels.
 		a.log.WarnContext(ctx, "cannot look up the program guide", "err", gerr)
 	}
+	offsets, err := titleOffsets(ctx, svc)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]Channel, 0, len(cs))
 	for _, c := range cs {
 		info := guide[c.ID]
-		ch := Channel{ID: c.ID, Name: c.Name, Group: c.Group, Favorite: c.Favorite, Logo: c.TvgLogo != "" || info.Icon != ""}
+		hours := offsets[c.PlaylistID]
+		ch := Channel{ID: c.ID, Name: playlist.ShiftTimes(c.Name, hours), Group: c.Group, Favorite: c.Favorite, Logo: c.TvgLogo != "" || info.Icon != ""}
 		if len(info.Programmes) > 0 {
-			p := toProgramme(info.Programmes[0])
+			p := toProgramme(info.Programmes[0], hours)
 			ch.Now = &p
 		}
 		out = append(out, ch)
@@ -557,9 +589,13 @@ func (a *App) ChannelGuide(channelID int64) (_ []Programme, err error) {
 	if err != nil {
 		return nil, err
 	}
+	offsets, err := titleOffsets(ctx, svc)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]Programme, 0, len(info.Programmes))
 	for _, p := range info.Programmes {
-		out = append(out, toProgramme(p))
+		out = append(out, toProgramme(p, offsets[c.PlaylistID]))
 	}
 	return out, nil
 }
@@ -858,12 +894,12 @@ func toPlaylist(p playlist.Playlist) Playlist {
 		ID: p.ID, Name: p.Name, SourceType: string(p.SourceType), Source: p.DisplaySource(),
 		ChannelCount: p.ChannelCount, LastRefreshedAt: refreshed,
 		GuideSource: p.DisplayGuideSource(), GuideCustom: p.GuideURL != "", GuideUpdatedAt: guideRefreshed,
-		Disabled: p.Disabled,
+		Disabled: p.Disabled, TitleTimeOffset: p.TitleTimeOffset,
 	}
 }
 
-func toProgramme(p epg.Programme) Programme {
-	return Programme{Title: p.Title, Description: p.Description, Start: p.Start.Unix(), Stop: p.Stop.Unix()}
+func toProgramme(p epg.Programme, titleHours int) Programme {
+	return Programme{Title: playlist.ShiftTimes(p.Title, titleHours), Description: p.Description, Start: p.Start.Unix(), Stop: p.Stop.Unix()}
 }
 
 // uiError replaces an error's message for the UI but keeps it for errors.Is.

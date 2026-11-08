@@ -114,6 +114,10 @@ export function SetPlaylistGuide(arg1, arg2) {
   return window['go']['main']['App']['SetPlaylistGuide'](arg1, arg2);
 }
 
+export function SetPlaylistTitleTimeOffset(arg1, arg2) {
+  return window['go']['main']['App']['SetPlaylistTitleTimeOffset'](arg1, arg2);
+}
+
 export function SetPlaylistURL(arg1, arg2) {
   return window['go']['main']['App']['SetPlaylistURL'](arg1, arg2);
 }

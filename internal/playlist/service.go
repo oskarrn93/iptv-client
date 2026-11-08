@@ -407,6 +407,15 @@ func (s *Service) SetDisabled(ctx context.Context, id int64, disabled bool) erro
 	return s.repo.SetDisabled(ctx, id, disabled)
 }
 
+// SetTitleTimeOffset sets the hours (within ±MaxTitleTimeOffset) that the
+// UI adds to clock times in the playlist's channel and programme titles.
+func (s *Service) SetTitleTimeOffset(ctx context.Context, id int64, hours int) error {
+	if hours < -MaxTitleTimeOffset || hours > MaxTitleTimeOffset {
+		return fmt.Errorf("the offset must be within ±%d hours", MaxTitleTimeOffset)
+	}
+	return s.repo.SetTitleTimeOffset(ctx, id, hours)
+}
+
 // Delete removes a playlist with its channels and favorites.
 func (s *Service) Delete(ctx context.Context, id int64) error {
 	return s.db.InTx(ctx, func(tx database.Querier) error {

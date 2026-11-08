@@ -58,6 +58,8 @@ export function SetPlaylistDisabled(arg1:number,arg2:boolean):Promise<void>;
 
 export function SetPlaylistGuide(arg1:number,arg2:string):Promise<main.Playlist>;
 
+export function SetPlaylistTitleTimeOffset(arg1:number,arg2:number):Promise<void>;
+
 export function SetPlaylistURL(arg1:number,arg2:string):Promise<main.ImportResult>;
 
 export function SetTheme(arg1:string):Promise<void>;

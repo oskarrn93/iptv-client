@@ -415,6 +415,24 @@ func TestSetDisabled(t *testing.T) {
 	}
 }
 
+func TestSetTitleTimeOffset(t *testing.T) {
+	ctx := context.Background()
+	svc := newServices(t)
+	id := addEmptyPlaylist(t, svc, "a")
+	if err := svc.Playlists.SetTitleTimeOffset(ctx, id, -1); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := svc.Playlists.Get(ctx, id); err != nil || p.TitleTimeOffset != -1 {
+		t.Errorf("after set = %+v, %v", p, err)
+	}
+	if err := svc.Playlists.SetTitleTimeOffset(ctx, id, 24); err == nil {
+		t.Error("an offset of 24 hours was accepted")
+	}
+	if err := svc.Playlists.SetTitleTimeOffset(ctx, 999, 1); !errors.Is(err, database.ErrNotFound) {
+		t.Errorf("missing playlist err = %v", err)
+	}
+}
+
 func TestReplaceChannelsRollsBackOnError(t *testing.T) {
 	ctx := context.Background()
 	svc := newServices(t)

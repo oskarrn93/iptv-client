@@ -34,6 +34,7 @@ type Playlist struct {
 	TvgURL           string
 	GuideRefreshedAt time.Time // zero if the guide was never imported
 	Disabled         bool      // hidden from the playlist list
+	TitleTimeOffset  int       // hours added to times in titles, see ShiftTimes
 }
 
 // GuideSource is the program guide URL in use, "" if there is none.
