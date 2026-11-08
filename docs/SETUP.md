@@ -267,7 +267,10 @@ repo under **Settings → Code security** (the config file can't enable them).
 
 ### Making a release
 
-1. Tag and push (the tag must be `vX.Y.Z`):
+1. Run the **Release** workflow from the Actions tab (leave *dry-run* on first to
+   see the next version). It picks `vX.Y.Z` from the conventional commits since the
+   last tag and creates the tag and release with a GitHub App token, so the tag
+   triggers the build below. Or tag by hand (the tag must be `vX.Y.Z`):
    ```bash
    git tag v0.2.0 && git push origin v0.2.0
    ```
@@ -278,6 +281,10 @@ repo under **Settings → Code security** (the config file can't enable them).
    Release with `iptv-client-windows-amd64-setup.exe` and
    `iptv-client-macos-universal.dmg`. The install notes in `.github/release-notes.md`
    come first, followed by GitHub's generated changelog.
+
+The App's credentials (`APP_CLIENT_ID` variable, `APP_PRIVATE_KEY` secret) are set by
+Terraform in [github-infra](https://github.com/oskarrn93/github-infra); don't edit them
+in the repo settings.
 
 The committed `productVersion` stays at the `0.0.0` placeholder. Don't bump it
 by hand. Local builds show version `dev` unless you pass

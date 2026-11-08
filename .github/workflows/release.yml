@@ -1,0 +1,23 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Print the computed version without tagging or releasing
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    uses: oskarrn93/github-actions/.github/workflows/semver-release.yml@ad740e356a7c3a871317d968f31569ceecafda43 # v1
+    with:
+      dry-run: ${{ inputs.dry-run }}
+      client-id: ${{ vars.APP_CLIENT_ID }}
+    secrets:
+      app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
