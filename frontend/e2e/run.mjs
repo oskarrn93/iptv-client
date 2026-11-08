@@ -419,6 +419,7 @@ try {
   await page.click('dialog[open] button:has-text("Save")');
   check('invalid guide URL keeps the dialog open', (await page.$('dialog[open]')) !== null);
   await page.fill('dialog[open] input[type=url]', 'https://epg.example/guide.xml.gz?user=u&pass=p');
+  await page.fill('dialog[open] input[type=number]', '-1');
   await shot('08-edit-playlist');
   await page.click('dialog[open] button:has-text("Save")');
   await page.waitForSelector('#playlists .item-name:has-text("Renamed List")');
