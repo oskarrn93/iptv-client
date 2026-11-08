@@ -269,8 +269,10 @@ repo under **Settings → Code security** (the config file can't enable them).
 
 1. Run the **Release** workflow from the Actions tab (leave *dry-run* on first to
    see the next version). It picks `vX.Y.Z` from the conventional commits since the
-   last tag and creates the tag and release with a GitHub App token, so the tag
-   triggers the build below. Or tag by hand (the tag must be `vX.Y.Z`):
+   last tag and pushes it with a GitHub App token, so the tag triggers the build
+   below (a push with the default token wouldn't). The release itself is created
+   by that build, so it never exists without its installers (the in-app updater
+   reads the latest release). Or tag by hand (the tag must be `vX.Y.Z`):
    ```bash
    git tag v0.2.0 && git push origin v0.2.0
    ```
