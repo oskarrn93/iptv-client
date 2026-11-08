@@ -101,6 +101,17 @@ func TestParseRejectsOtherDocuments(t *testing.T) {
 	}
 }
 
+// A guide's offset must win over the machine's zone, even when they match.
+func TestParseTimeIgnoresLocalZone(t *testing.T) {
+	old := time.Local
+	defer func() { time.Local = old }()
+	time.Local = time.FixedZone("CET", 3600)
+	got, ok := parseTime("20260720200000 +0100")
+	if want := time.Date(2026, 7, 20, 19, 0, 0, 0, time.UTC); !ok || !got.Equal(want) {
+		t.Errorf("parseTime = %v, %v; want %v", got, ok, want)
+	}
+}
+
 func TestParseTime(t *testing.T) {
 	cases := map[string]time.Time{
 		"20261020123456 +0000": time.Date(2026, 10, 20, 12, 34, 56, 0, time.UTC),
