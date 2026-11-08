@@ -49,8 +49,7 @@ jobs:
         with:
           go-version-file: go.mod
       # Carries the fuzzing engine's discovered inputs from night to night.
-      - id: corpus
-        if: github.event_name == 'schedule'
+      - if: github.event_name == 'schedule'
         uses: actions/cache/restore@v4
         with:
           path: ~/.cache/go-build/fuzz
