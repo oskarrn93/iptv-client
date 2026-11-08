@@ -1,8 +1,8 @@
-name: Fuzz weekly
+name: Fuzz nightly
 
 on:
   schedule:
-    - cron: '0 3 * * 1'
+    - cron: '0 3 * * *'
   workflow_dispatch:
 
 permissions:
@@ -12,5 +12,5 @@ jobs:
   fuzz:
     uses: ./.github/workflows/fuzz.yml
     with:
-      fuzztime: 30m
+      fuzztime: 15m
       persist: true

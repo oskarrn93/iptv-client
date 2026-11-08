@@ -27,7 +27,7 @@ jobs:
     uses: oskarrn93/github-actions/.github/workflows/actionlint.yml@cf66633427573d9d5b3a1e0969f3d0575fdd681f # v1
 
   # Fuzzing runs in CI because Windows Smart App Control can block the
-  # instrumented fuzz binary on developer machines. fuzz-weekly.yml runs it longer.
+  # instrumented fuzz binary on developer machines. fuzz-nightly.yml runs it longer.
   fuzz:
     uses: ./.github/workflows/fuzz.yml
     with:
