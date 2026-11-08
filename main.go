@@ -41,7 +41,7 @@ func main() {
 		BackgroundColour:   &options.RGBA{R: 24, G: 26, B: 31, A: 255},
 		Menu:               app.appMenu(),
 		OnStartup:          app.startup,
-		OnDomReady:         finishAppMenu,
+		OnDomReady:         app.domReady,
 		OnShutdown:         app.shutdown,
 		Logger:             logging.Wails(logs.Logger),
 		LogLevel:           logging.WailsLevel,

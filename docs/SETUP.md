@@ -11,7 +11,7 @@ same toolchain but have not yet been verified on a Mac (see
 |---|---|---|
 | Git | any recent | source control |
 | Go | 1.27.3 (go.mod requires ≥ 1.27.3) | backend, build tool |
-| Node.js | 24 LTS (24.20.0), with npm 11 | builds the frontend (Vite + TypeScript) |
+| Node.js | 26 LTS, with npm 11 (pinned in `frontend/.nvmrc`, which CI also reads) | builds the frontend (Vite + TypeScript) |
 | Wails CLI | v2.17.1 | **not installed globally** — pinned in `go.mod` and run with `go tool wails` |
 | WebView2 runtime | preinstalled on Windows 10/11 | renders the UI on Windows |
 | Xcode Command Line Tools | macOS only | C compiler for the macOS webview (CGO) |
@@ -33,7 +33,7 @@ winget install --id VideoLAN.VLC -e        # to play streams
 
 # 2. Open a NEW terminal so PATH picks up Go and Node, then check
 go version        # go1.27.3 or newer
-node --version    # v24.x
+node --version    # v26.x
 npm --version
 
 # 3. Get the code

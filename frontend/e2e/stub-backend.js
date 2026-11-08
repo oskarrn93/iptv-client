@@ -90,6 +90,28 @@
 
   window.__calls = [];
   window.__logs = [];
+  // Like importGuard: one import at a time, reported with 'import' events.
+  let importing = false;
+  const guarded = async (op, playlistId, fn) => {
+    if (importing) throw 'another playlist is being imported; wait for it to finish';
+    importing = true;
+    emit('import', { running: true, op, playlistId });
+    try {
+      return await fn();
+    } finally {
+      importing = false;
+      emit('import', { running: false, op, playlistId });
+    }
+  };
+  // Tests play the background sync (sync.go): start a refresh, look at the
+  // UI, then end it with (part of) its SyncUpdate.
+  let endSync = () => {};
+  window.__stubSyncStart = ({ playlistId, guide = false }) =>
+    void guarded(guide ? 'refresh_guide' : 'refresh_playlist', playlistId, () => new Promise((r) => (endSync = r))).then((u) =>
+      emit('sync', { playlistId, guide, changed: false, error: '', ...u }),
+    );
+  window.__stubSyncEnd = (update = {}) => endSync(update);
+
   const api = {
     // playlists is kept in the user's order.
     async ListPlaylists() {
@@ -281,6 +303,16 @@
       window.__installed = true;
     },
   };
+
+  for (const [method, op] of [
+    ['AddPlaylistURL', 'add_playlist'],
+    ['RefreshPlaylist', 'refresh_playlist'],
+    ['SetPlaylistURL', 'set_playlist_url'],
+    ['RefreshGuide', 'refresh_guide'],
+  ]) {
+    const fn = api[method];
+    api[method] = (...args) => guarded(op, op === 'add_playlist' ? 0 : args[0], () => fn(...args));
+  }
 
   window.__emit = emit;
   window.go = { main: { App: api } };
