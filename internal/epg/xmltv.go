@@ -237,7 +237,10 @@ func parseTime(s string) (time.Time, bool) {
 		if err != nil {
 			return time.Time{}, false
 		}
-		loc = z.Location()
+		// Not z.Location(): Parse may return Local there, which would
+		// apply this machine's DST rules to the guide's own offset.
+		_, off := z.Zone()
+		loc = time.FixedZone("", off)
 	}
 	t, err := time.ParseInLocation("20060102150405", digits, loc)
 	if err != nil {
