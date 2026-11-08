@@ -90,7 +90,6 @@
 
   window.__calls = [];
   window.__logs = [];
-  const api = {
   // Like importGuard: one import at a time, reported with 'import' events.
   let importing = false;
   const guarded = async (op, playlistId, fn) => {
@@ -112,6 +111,8 @@
       emit('sync', { playlistId, guide, changed: false, error: '', ...u }),
     );
   window.__stubSyncEnd = (update = {}) => endSync(update);
+
+  const api = {
     // playlists is kept in the user's order.
     async ListPlaylists() {
       return [...playlists];
@@ -303,12 +304,6 @@
     },
   };
 
-  window.__emit = emit;
-  window.go = { main: { App: api } };
-  window.runtime = {
-    EventsOnMultiple(name, cb) {
-      const list = listeners.get(name) ?? [];
-      list.push(cb);
   for (const [method, op] of [
     ['AddPlaylistURL', 'add_playlist'],
     ['RefreshPlaylist', 'refresh_playlist'],
@@ -318,6 +313,13 @@
     const fn = api[method];
     api[method] = (...args) => guarded(op, op === 'add_playlist' ? 0 : args[0], () => fn(...args));
   }
+
+  window.__emit = emit;
+  window.go = { main: { App: api } };
+  window.runtime = {
+    EventsOnMultiple(name, cb) {
+      const list = listeners.get(name) ?? [];
+      list.push(cb);
       listeners.set(name, list);
       return () => listeners.set(name, (listeners.get(name) ?? []).filter((x) => x !== cb));
     },
