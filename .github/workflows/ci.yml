@@ -26,23 +26,12 @@ jobs:
   actionlint:
     uses: oskarrn93/github-actions/.github/workflows/actionlint.yml@cf66633427573d9d5b3a1e0969f3d0575fdd681f # v1
 
-  # Fuzzing runs here because Windows Smart App Control can block the
-  # instrumented fuzz binary on developer machines.
+  # Fuzzing runs in CI because Windows Smart App Control can block the
+  # instrumented fuzz binary on developer machines. fuzz-nightly.yml runs it longer.
   fuzz:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - {pkg: ./internal/m3u, target: FuzzParse, time: 60s}
-          - {pkg: ./internal/redact, target: FuzzString, time: 30s}
-          - {pkg: ./internal/epg, target: FuzzParse, time: 30s}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      - run: go test ${{ matrix.pkg }} -run '^$' -fuzz ${{ matrix.target }} -fuzztime ${{ matrix.time }}
+    uses: ./.github/workflows/fuzz.yml
+    with:
+      fuzztime: 15s
 
   frontend:
     runs-on: ubuntu-latest
