@@ -30,14 +30,19 @@ jobs:
   # instrumented fuzz binary on developer machines.
   fuzz:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {pkg: ./internal/m3u, target: FuzzParse, time: 60s}
+          - {pkg: ./internal/redact, target: FuzzString, time: 30s}
+          - {pkg: ./internal/epg, target: FuzzParse, time: 30s}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - run: go test ./internal/m3u -run '^$' -fuzz FuzzParse -fuzztime 60s
-      - run: go test ./internal/redact -run '^$' -fuzz FuzzString -fuzztime 30s
-      - run: go test ./internal/epg -run '^$' -fuzz FuzzParse -fuzztime 30s
+      - run: go test ${{ matrix.pkg }} -run '^$' -fuzz ${{ matrix.target }} -fuzztime ${{ matrix.time }}
 
   frontend:
     runs-on: ubuntu-latest
