@@ -17,9 +17,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
+      # Caches are scoped to the tag ref, so a later tag could never restore this one.
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          cache: false
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -55,9 +57,11 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
+      # Caches are scoped to the tag ref, so a later tag could never restore this one.
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          cache: false
       - uses: actions/setup-node@v7
         with:
           node-version: 24
