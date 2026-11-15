@@ -31,14 +31,14 @@ jobs:
         with:
           go-version-file: go.mod
       - if: inputs.persist
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cache/go-build/fuzz
           key: fuzz-corpus-${{ matrix.name }}-${{ github.run_id }}
           restore-keys: fuzz-corpus-${{ matrix.name }}-
       - run: go test ${{ matrix.pkg }} -run '^$' -fuzz ${{ matrix.target }} -fuzztime ${{ inputs.fuzztime }}
       - if: always() && inputs.persist
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/.cache/go-build/fuzz
           key: fuzz-corpus-${{ matrix.name }}-${{ github.run_id }}
