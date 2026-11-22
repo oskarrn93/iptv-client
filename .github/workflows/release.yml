@@ -15,7 +15,7 @@ jobs:
   release:
     permissions:
       contents: write
-    uses: oskarrn93/github-actions/.github/workflows/semver-release.yml@da698a589fd694fa38175bc7af7404b4a509faab # v1
+    uses: oskarrn93/github-actions/.github/workflows/semver-release.yml@e47e3cc97693c6043109525db91f5d2646963f2f # v1
     with:
       dry-run: ${{ inputs.dry-run }}
       create-release: false
